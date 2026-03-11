@@ -8,6 +8,15 @@ import { getClaudeUsageStats } from "./usage-tracker.js";
 import { getSubscriptionUsage, forceRefreshSubscription } from "./subscription-usage.js";
 import { loadLessons, deleteLesson, clearLessons, addLesson } from "./lessons.js";
 
+function maskSecret(value?: string): string {
+  if (!value) return "";
+  return "****" + value.slice(-4);
+}
+
+function isMaskedSecret(value: unknown): value is string {
+  return typeof value === "string" && /^\*{4}.{0,}$/.test(value);
+}
+
 export function setupApiRoutes(app: Express): void {
   // ── Config ──
   app.get("/api/config", (_req, res) => {
@@ -17,12 +26,9 @@ export function setupApiRoutes(app: Express): void {
     const hasApiKey = !!(config.anthropicApiKey && config.anthropicApiKey.length > 0);
     res.json({
       ...config,
-      anthropicApiKey: hasApiKey
-        ? "****" + config.anthropicApiKey!.slice(-4)
-        : "",
-      geminiApiKey: config.geminiApiKey
-        ? "****" + config.geminiApiKey.slice(-4)
-        : "",
+      anthropicApiKey: hasApiKey ? maskSecret(config.anthropicApiKey) : "",
+      geminiApiKey: maskSecret(config.geminiApiKey),
+      githubToken: maskSecret(config.githubToken),
       /** true = using API key, false = using Claude Max subscription */
       hasApiKey,
     });
@@ -34,11 +40,14 @@ export function setupApiRoutes(app: Express): void {
     const ALLOWED_KEYS = new Set([
       "anthropicApiKey", "geminiApiKey", "model", "subagentModel",
       "maxTurns", "maxBudgetUsd", "defaultWorkingDir", "mcpServers",
-      "githubToken",
+      "githubToken", "gitEnabled", "theme", "thinkingEnabled",
     ]);
+    const SECRET_KEYS = new Set(["anthropicApiKey", "geminiApiKey", "githubToken"]);
     const patch: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(req.body)) {
-      if (ALLOWED_KEYS.has(key)) patch[key] = value;
+      if (!ALLOWED_KEYS.has(key)) continue;
+      if (SECRET_KEYS.has(key) && isMaskedSecret(value)) continue;
+      patch[key] = value;
     }
     const updated = { ...config, ...patch };
     saveConfig(updated);
@@ -173,7 +182,12 @@ export function setupApiRoutes(app: Express): void {
   // ── GitHub Device Flow OAuth ──
   app.post("/api/github/device-code", async (_req, res) => {
     try {
-      const { requestDeviceCode } = await import("./github-oauth.js");
+      const { isGitHubDeviceFlowAvailable, requestDeviceCode } = await import("./github-oauth.js");
+      if (!isGitHubDeviceFlowAvailable()) {
+        return res.status(501).json({
+          error: "GitHub browser login is unavailable until ORCHESTRA_GITHUB_CLIENT_ID is configured.",
+        });
+      }
       const data = await requestDeviceCode();
       res.json(data);
     } catch (error) {
@@ -185,7 +199,12 @@ export function setupApiRoutes(app: Express): void {
     try {
       const { device_code, interval, expires_in } = req.body;
       if (!device_code) return res.status(400).json({ error: "device_code required" });
-      const { pollForToken } = await import("./github-oauth.js");
+      const { isGitHubDeviceFlowAvailable, pollForToken } = await import("./github-oauth.js");
+      if (!isGitHubDeviceFlowAvailable()) {
+        return res.status(501).json({
+          error: "GitHub browser login is unavailable until ORCHESTRA_GITHUB_CLIENT_ID is configured.",
+        });
+      }
       const token = await pollForToken(device_code, interval || 5, expires_in || 900);
       // Auto-save to config
       const config = loadConfig();

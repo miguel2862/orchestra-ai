@@ -56,13 +56,23 @@ export async function runSetup(): Promise<void> {
 
   let githubToken: string | undefined;
   if (wantsGitHub) {
+    const { isGitHubDeviceFlowAvailable } = await import("../server/github-oauth.js");
+    const deviceFlowAvailable = isGitHubDeviceFlowAvailable();
+    if (!deviceFlowAvailable) {
+      console.log(
+        chalk.dim(
+          "  Browser login is unavailable until ORCHESTRA_GITHUB_CLIENT_ID is set with a GitHub OAuth App client_id.\n",
+        ),
+      );
+    }
+
     const ghMethod = await select({
       message: "How do you want to connect GitHub?",
       choices: [
-        {
+        ...(deviceFlowAvailable ? [{
           name: "🌐 Login via browser (recommended — opens GitHub in your browser)",
           value: "device_flow" as const,
-        },
+        }] : []),
         {
           name: "🔑 Paste a Personal Access Token manually",
           value: "pat" as const,
@@ -251,10 +261,20 @@ export async function runPostUpdateSetup(existingConfig: OrchestraConfig): Promi
       });
 
       if (wantsGitHub) {
+        const { isGitHubDeviceFlowAvailable } = await import("../server/github-oauth.js");
+        const deviceFlowAvailable = isGitHubDeviceFlowAvailable();
+        if (!deviceFlowAvailable) {
+          console.log(
+            chalk.dim(
+              "  Browser login is unavailable until ORCHESTRA_GITHUB_CLIENT_ID is set.\n",
+            ),
+          );
+        }
+
         const ghMethod = await select({
           message: "How do you want to connect GitHub?",
           choices: [
-            { name: "🌐 Login via browser (recommended)", value: "device_flow" as const },
+            ...(deviceFlowAvailable ? [{ name: "🌐 Login via browser (recommended)", value: "device_flow" as const }] : []),
             { name: "🔑 Paste a Personal Access Token", value: "pat" as const },
           ],
         });

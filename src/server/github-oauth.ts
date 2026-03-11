@@ -19,9 +19,10 @@
 
 // ── GitHub Device Flow ─────────────────────────────────────────────────────
 
-// Public client_id for Orchestra AI (Device Flow — no client_secret needed)
-// Users should replace this with their own OAuth App's client_id if self-hosting
-const GITHUB_CLIENT_ID = "Iv1.orchestra_ai_dev";
+// Official Orchestra AI OAuth App — Device Flow enabled, no client_secret needed.
+// Self-hosted users can override via ORCHESTRA_GITHUB_CLIENT_ID env var.
+const DEFAULT_GITHUB_CLIENT_ID = "Ov23li8VfzK3NAo96J8V";
+const GITHUB_CLIENT_ID_ENV = "ORCHESTRA_GITHUB_CLIENT_ID";
 
 interface DeviceCodeResponse {
   device_code: string;
@@ -42,19 +43,31 @@ interface ErrorResponse {
   error_description?: string;
 }
 
+export function getGitHubDeviceFlowClientId(clientId?: string): string {
+  return clientId?.trim() || process.env[GITHUB_CLIENT_ID_ENV]?.trim() || DEFAULT_GITHUB_CLIENT_ID;
+}
+
+export function isGitHubDeviceFlowAvailable(_clientId?: string): boolean {
+  return true; // Always available now that we have a real client_id
+}
+
+function resolveGitHubClientId(clientId?: string): string {
+  return getGitHubDeviceFlowClientId(clientId);
+}
+
 /**
  * Step 1: Request a device code from GitHub.
  * Returns the user_code and verification_uri to show to the user.
  */
 export async function requestDeviceCode(clientId?: string): Promise<DeviceCodeResponse> {
-  const id = clientId || GITHUB_CLIENT_ID;
+  const id = resolveGitHubClientId(clientId);
   const response = await fetch("https://github.com/login/device/code", {
     method: "POST",
     headers: {
       "Accept": "application/json",
-      "Content-Type": "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: JSON.stringify({
+    body: new URLSearchParams({
       client_id: id,
       scope: "repo workflow",
     }),
@@ -78,7 +91,7 @@ export async function pollForToken(
   expiresIn: number,
   clientId?: string,
 ): Promise<string> {
-  const id = clientId || GITHUB_CLIENT_ID;
+  const id = resolveGitHubClientId(clientId);
   const startTime = Date.now();
   const expiresAt = startTime + expiresIn * 1000;
   let pollInterval = Math.max(interval, 5) * 1000; // minimum 5 seconds
@@ -90,9 +103,9 @@ export async function pollForToken(
       method: "POST",
       headers: {
         "Accept": "application/json",
-        "Content-Type": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
       },
-      body: JSON.stringify({
+      body: new URLSearchParams({
         client_id: id,
         device_code: deviceCode,
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",

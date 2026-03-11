@@ -52,7 +52,7 @@ interface RunMemory {
   startedAt: string; completedAt?: string; success?: boolean;
   totalCostUsd: number; durationMs: number; numTurns: number;
   agentStats: Record<string, AgentRunStat>; decisions: string[];
-  feedbackLoops?: Array<{ qualityGate: string; loopNumber: number; resolved: boolean }>;
+  feedbackLoops?: Array<{ qualityGate: string; loopNumber: number; resolved: boolean; reason?: string }>;
 }
 
 function ensureOrchestraDir(workingDir: string): string {
@@ -965,7 +965,7 @@ MANDATORY WORKFLOW:
    - Contributing guide
 8. Create any missing configs: .eslintrc / biome.json, .prettierrc, .gitignore
 9. Consolidate all agent reports into a single ORCHESTRA_REPORT.md:
-   - Read all markdown report files (ARCHITECTURE.md, SECURITY_REPORT.md, BUILD_VALIDATION_REPORT.md, CODE_REVIEW_REPORT.md, TEST_REPORT.md, DATABASE.md, etc.)
+   - Read all markdown report files (ARCHITECTURE.md, SECURITY_REPORT.md, BUILD_VALIDATION_REPORT.md, CODE_REVIEW.md, TEST_REPORT.md, VISUAL_TEST_REPORT.md, DATABASE.md, etc.)
    - Merge them into ORCHESTRA_REPORT.md with clear ## sections per agent
    - Delete the individual report files (keep only README.md and ORCHESTRA_REPORT.md as docs)
 10. VERIFY AND LEAVE THE APP RUNNING:
@@ -1058,7 +1058,7 @@ Write VISUAL_TEST_REPORT.md with:
 FINAL LINE (required): End your response with EXACTLY one of:
 "QUALITY GATE: PASS" — app loads, all pages render, no console errors, interactions work
 "QUALITY GATE: FAIL — [issue1]; [issue2]" — visual or functional issues found`,
-      tools: ["Read", "Glob", "Grep", "Bash"],
+      tools: ["Read", "Write", "Glob", "Grep", "Bash"],
       ...agentMdl("visual_tester"),
     },
   };
@@ -1152,8 +1152,8 @@ async function runAgent(
   const agentStartTimes = new Map<string, number>();
   const agentMessages: Array<{ agent: string; text: string }> = [];
   const agentCompletionCount = new Map<string, number>();
-  const activeLoops = new Map<string, { fromAgent: string; loopNumber: number; qualityGate: string }>();
-  const completedLoops: Array<{ qualityGate: string; loopNumber: number; resolved: boolean }> = [];
+  const activeLoops = new Map<string, { fromAgent: string; loopNumber: number; qualityGate: string; reason: string }>();
+  const completedLoops: Array<{ qualityGate: string; loopNumber: number; resolved: boolean; reason?: string }> = [];
   const rc = loadOrchestraRC(projectConfig.workingDir);
   const usesDB = projectUsesDatabase(projectConfig);
 
@@ -1225,7 +1225,7 @@ async function runAgent(
               if (activeLoops.has(taskId)) {
                 const loop = activeLoops.get(taskId)!;
                 activeLoops.delete(taskId);
-                completedLoops.push({ qualityGate: loop.qualityGate, loopNumber: loop.loopNumber, resolved: true });
+                completedLoops.push({ qualityGate: loop.qualityGate, loopNumber: loop.loopNumber, resolved: true, reason: loop.reason });
                 emit(projectId, { type: "feedback_loop_completed", projectId, timestamp: Date.now(), data: { fromAgent: loop.fromAgent, toAgent: agent, success: true, loopNumber: loop.loopNumber, qualityGate: loop.qualityGate } });
               }
             }
@@ -1286,13 +1286,14 @@ async function runAgent(
                 if (priorCompletions > 0) {
                   const qualityGate = detectQualityGate(agent, agentCompletionCount);
                   const loopNumber = priorCompletions;
-                  activeLoops.set(block.id, { fromAgent: qualityGate, loopNumber, qualityGate });
                   const desc = (block.input?.description || block.input?.prompt || "").slice(0, 120);
+                  const reason = desc || `Re-running ${agent}`;
+                  activeLoops.set(block.id, { fromAgent: qualityGate, loopNumber, qualityGate, reason });
                   emit(projectId, {
                     type: "feedback_loop_started",
                     projectId,
                     timestamp: Date.now(),
-                    data: { fromAgent: qualityGate, toAgent: agent, reason: desc || `Re-running ${agent}`, loopNumber, qualityGate },
+                    data: { fromAgent: qualityGate, toAgent: agent, reason, loopNumber, qualityGate },
                   });
                   console.log(`[orchestrator] ${projectId}: FEEDBACK LOOP ${loopNumber} — ${qualityGate} → ${agent}`);
                 }
@@ -1311,7 +1312,7 @@ async function runAgent(
               if (activeLoops.has(block.tool_use_id)) {
                 const loop = activeLoops.get(block.tool_use_id)!;
                 activeLoops.delete(block.tool_use_id);
-                completedLoops.push({ qualityGate: loop.qualityGate, loopNumber: loop.loopNumber, resolved: taskSuccess });
+                completedLoops.push({ qualityGate: loop.qualityGate, loopNumber: loop.loopNumber, resolved: taskSuccess, reason: loop.reason });
                 emit(projectId, { type: "feedback_loop_completed", projectId, timestamp: Date.now(), data: { fromAgent: loop.fromAgent, toAgent: agent, success: taskSuccess, loopNumber: loop.loopNumber, qualityGate: loop.qualityGate } });
               }
             }
@@ -1366,7 +1367,7 @@ async function runAgent(
   }
 }
 
-async function handleCompletion(projectId: string, result: SDKResultMessage, startTime: number, totalCostUsd: number, numTurns: number, agentStats: Record<string, AgentRunStat>, projectConfig: ProjectConfig, agentMessages: Array<{ agent: string; text: string }> = [], completedLoops: Array<{ qualityGate: string; loopNumber: number; resolved: boolean }> = []) {
+async function handleCompletion(projectId: string, result: SDKResultMessage, startTime: number, totalCostUsd: number, numTurns: number, agentStats: Record<string, AgentRunStat>, projectConfig: ProjectConfig, agentMessages: Array<{ agent: string; text: string }> = [], completedLoops: Array<{ qualityGate: string; loopNumber: number; resolved: boolean; reason?: string }> = []) {
   const success = !result.is_error;
   const resultText = "result" in result ? result.result : undefined;
   const stats = buildAgentStats(agentStats);

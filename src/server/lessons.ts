@@ -411,6 +411,7 @@ function mapGateToCategory(gate: string): Lesson["category"] {
     case "security": return "runtime";
     case "tester": return "test";
     case "reviewer": return "design";
+    case "visual_tester": return "design";
     case "deployer": return "config";
     default: return "other";
   }

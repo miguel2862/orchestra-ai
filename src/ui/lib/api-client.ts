@@ -15,8 +15,10 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 /** Config as returned by GET /api/config (API keys are masked) */
-export type MaskedConfig = Omit<OrchestraConfig, "anthropicApiKey"> & {
+export type MaskedConfig = Omit<OrchestraConfig, "anthropicApiKey" | "geminiApiKey" | "githubToken"> & {
   anthropicApiKey: string;
+  geminiApiKey: string;
+  githubToken: string;
   hasApiKey: boolean;
 };
 

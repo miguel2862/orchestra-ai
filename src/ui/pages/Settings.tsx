@@ -6,6 +6,15 @@ import HelpTip from "../components/HelpTip";
 import { MODEL_OPTIONS, AGENT_MODEL_OPTIONS } from "@shared/types";
 import { Github } from "lucide-react";
 
+function pickEditableConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const { anthropicApiKey, geminiApiKey, githubToken, hasApiKey, ...rest } = config;
+  void anthropicApiKey;
+  void geminiApiKey;
+  void githubToken;
+  void hasApiKey;
+  return rest;
+}
+
 export default function Settings() {
   const queryClient = useQueryClient();
   const { data: config } = useQuery({
@@ -14,12 +23,23 @@ export default function Settings() {
   });
 
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [secrets, setSecrets] = useState({
+    anthropicApiKey: "",
+    geminiApiKey: "",
+    githubToken: "",
+  });
   const [showApiKey, setShowApiKey] = useState(false);
   const [showGithubToken, setShowGithubToken] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    if (config) setForm(config);
+    if (!config) return;
+    setForm(pickEditableConfig(config as Record<string, unknown>));
+    setSecrets({
+      anthropicApiKey: "",
+      geminiApiKey: "",
+      githubToken: "",
+    });
   }, [config]);
 
   const mutation = useMutation({
@@ -34,6 +54,17 @@ export default function Settings() {
   const set = (key: string, value: unknown) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  const setSecret = (key: "anthropicApiKey" | "geminiApiKey" | "githubToken", value: string) =>
+    setSecrets((prev) => ({ ...prev, [key]: value }));
+
+  const saveSettings = () => {
+    const patch: Record<string, unknown> = { ...form };
+    if (secrets.anthropicApiKey) patch.anthropicApiKey = secrets.anthropicApiKey;
+    if (secrets.geminiApiKey) patch.geminiApiKey = secrets.geminiApiKey;
+    if (secrets.githubToken) patch.githubToken = secrets.githubToken;
+    mutation.mutate(patch);
+  };
+
   return (
     <div className="max-w-2xl mx-auto p-8">
       <h1 className="text-2xl font-bold mb-6 gradient-text">Settings</h1>
@@ -46,10 +77,10 @@ export default function Settings() {
             <div className="relative">
               <input
                 type={showApiKey ? "text" : "password"}
-                value={(form.anthropicApiKey as string) ?? ""}
-                onChange={(e) => set("anthropicApiKey", e.target.value)}
+                value={secrets.anthropicApiKey}
+                onChange={(e) => setSecret("anthropicApiKey", e.target.value)}
                 className="input pr-10"
-                placeholder="sk-ant-... (leave empty for Claude Max)"
+                placeholder={config?.anthropicApiKey ? `${config.anthropicApiKey} (saved - type to replace)` : "sk-ant-... (leave empty for Claude Max)"}
               />
               <button
                 type="button"
@@ -63,16 +94,26 @@ export default function Settings() {
                 )}
               </button>
             </div>
+            {config?.anthropicApiKey && (
+              <p className="text-xs text-neutral-500 mt-1">
+                Leave blank to keep the saved key. Type a new key to replace it.
+              </p>
+            )}
           </Field>
 
           <Field label="Gemini API Key (optional — free)" helpTip="Free API key from Google AI Studio (aistudio.google.com). Enables AI image generation for project assets (icons, backgrounds, illustrations). The free tier is permanent and generous — no credit card required.">
             <input
               type="password"
-              value={(form.geminiApiKey as string) ?? ""}
-              onChange={(e) => set("geminiApiKey", e.target.value)}
+              value={secrets.geminiApiKey}
+              onChange={(e) => setSecret("geminiApiKey", e.target.value)}
               className="input"
-              placeholder="AIza... (free at aistudio.google.com)"
+              placeholder={config?.geminiApiKey ? `${config.geminiApiKey} (saved - type to replace)` : "AIza... (free at aistudio.google.com)"}
             />
+            {config?.geminiApiKey && (
+              <p className="text-xs text-neutral-500 mt-1">
+                Leave blank to keep the saved key. Type a new key to replace it.
+              </p>
+            )}
           </Field>
 
           <Field
@@ -87,10 +128,10 @@ export default function Settings() {
             <div className="relative">
               <input
                 type={showGithubToken ? "text" : "password"}
-                value={(form.githubToken as string) ?? ""}
-                onChange={(e) => set("githubToken", e.target.value)}
+                value={secrets.githubToken}
+                onChange={(e) => setSecret("githubToken", e.target.value)}
                 className="input pr-10"
-                placeholder="ghp_... (leave empty to work locally)"
+                placeholder={config?.githubToken ? `${config.githubToken} (saved - type to replace)` : "ghp_... (leave empty to work locally)"}
               />
               <button
                 type="button"
@@ -104,9 +145,14 @@ export default function Settings() {
                 )}
               </button>
             </div>
-            {(form.githubToken as string) && (
+            {(secrets.githubToken || config?.githubToken) && (
               <p className="text-xs text-emerald-500 mt-1 flex items-center gap-1">
                 <Check className="w-3 h-3" /> GitHub integration enabled — you can now enable "Push to GitHub" per project
+              </p>
+            )}
+            {config?.githubToken && (
+              <p className="text-xs text-neutral-500 mt-1">
+                Leave blank to keep the saved token. Type a new token to replace it.
               </p>
             )}
           </Field>
@@ -234,7 +280,7 @@ export default function Settings() {
         )}
 
         <button
-          onClick={() => mutation.mutate(form)}
+          onClick={saveSettings}
           disabled={mutation.isPending}
           className={`flex items-center gap-2 text-sm font-medium transition-all duration-300 ${
             saved
