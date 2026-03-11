@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { loadConfig, saveConfig } from "./config.js";
 import { startProject, stopProject, continueProject, getActiveProjectIds } from "./orchestrator.js";
-import { listProjects, getProject, getProjectEvents, deleteProject } from "./project-store.js";
+import { listProjects, getProject, getRecoveredProjectEvents, deleteProject } from "./project-store.js";
 import { getDefaultMcpServers } from "./mcp.js";
 import { listTemplates } from "./templates.js";
 import { getClaudeUsageStats } from "./usage-tracker.js";
@@ -110,8 +110,9 @@ export function setupApiRoutes(app: Express): void {
   });
 
   app.get("/api/projects/:id/events", async (req, res) => {
-    const events = getProjectEvents(req.params.id);
-    res.json(events);
+    const project = await getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: "Not found" });
+    res.json(getRecoveredProjectEvents(project));
   });
 
   app.post("/api/projects/:id/continue", async (req, res) => {

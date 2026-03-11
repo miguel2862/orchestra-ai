@@ -8,13 +8,15 @@ export default function UsagePanel() {
   const { data: stats, isLoading, dataUpdatedAt, refetch, isFetching } = useQuery<ClaudeUsageStats>({
     queryKey: ["usage"],
     queryFn: () => api.getUsageStats(),
-    refetchInterval: 60_000,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: true,
   });
 
   const { data: sub, isFetching: isFetchingSub } = useQuery<SubscriptionUsage>({
     queryKey: ["subscription"],
     queryFn: () => api.getSubscriptionUsage(),
-    refetchInterval: 120_000, // every 2 min
+    refetchInterval: 120_000,
+    refetchIntervalInBackground: true, // every 2 min
   });
 
   const { data: config } = useQuery({

@@ -144,12 +144,20 @@ export function formatLessonsForPrompt(techStack: string): string {
   const relevant = getLessonsForStack(techStack);
   if (relevant.length === 0) return "";
 
+  const mandatory = relevant
+    .filter((lesson) => lesson.hitCount >= 2)
+    .slice(0, 5)
+    .map((lesson, i) => `${i + 1}. ${lesson.fix}`);
   const lines = relevant.map(
     (l, i) => `${i + 1}. [${l.category}] ${l.summary} → Fix: ${l.fix}`,
   );
 
-  return `\n## LESSONS FROM PREVIOUS PROJECTS (avoid these mistakes)
-${lines.join("\n")}
+  return `
+## LESSONS FROM PREVIOUS PROJECTS (avoid these mistakes)
+${mandatory.length > 0 ? `Treat these as mandatory guardrails on this run:
+${mandatory.join("\n")}
+
+` : ""}${lines.join("\n")}
 `;
 }
 
@@ -334,6 +342,30 @@ export function extractLessonsFromFeedbackLoops(params: {
   return added;
 }
 
+export function extractLessonsFromRuntimeFailures(params: {
+  failures: string[];
+  techStack: string;
+  agent?: string;
+}): Lesson[] {
+  const { failures, techStack, agent } = params;
+  const stacks = extractStacks(techStack);
+  const added: Lesson[] = [];
+
+  for (const failure of failures) {
+    const normalized = failure.trim();
+    if (normalized.length < 8) continue;
+    added.push(addLesson({
+      agent: agent || inferAgentFromFailure(normalized),
+      category: inferCategoryFromFailure(normalized),
+      summary: normalized.slice(0, 180),
+      fix: suggestFixFromFailure(normalized),
+      stacks,
+    }));
+  }
+
+  return added;
+}
+
 // ── Feedback classification helpers ─────────────────────────────────────────
 
 function classifyUserFeedback(msg: string): Lesson["category"] {
@@ -403,6 +435,39 @@ function buildLessonSummary(userMessage: string): string {
 
   if (cleaned.length < 5) return "";
   return `User reported: ${cleaned}`;
+}
+
+function inferAgentFromFailure(failure: string): string {
+  if (/visual_tester|browser_|interaction|console|screenshot/i.test(failure)) return "visual_tester";
+  if (/security|secret|vulnerab/i.test(failure)) return "security";
+  if (/test|coverage|assert/i.test(failure)) return "tester";
+  if (/build|lint|type|compile/i.test(failure)) return "error_checker";
+  if (/deploy|startup|curl|respond/i.test(failure)) return "deployer";
+  return "runtime_gate";
+}
+
+function inferCategoryFromFailure(failure: string): Lesson["category"] {
+  if (/visual|design|layout|responsive|animation|interaction/i.test(failure)) return "design";
+  if (/test|coverage|assert/i.test(failure)) return "test";
+  if (/dependency|version|package|config|env|startup|deploy/i.test(failure)) return "config";
+  if (/type|lint|compile|syntax/i.test(failure)) return "syntax";
+  return "runtime";
+}
+
+function suggestFixFromFailure(failure: string): string {
+  if (/browser_navigate|browser_snapshot|browser_click|browser_console_messages|browser_take_screenshot/i.test(failure)) {
+    return "Use the required Playwright browser tools, click through changed flows, inspect console output, and capture screenshots before passing visual QA.";
+  }
+  if (/interaction|button|link|modal|form/i.test(failure)) {
+    return "Validate that interactive elements cause a visible DOM change, navigation, modal open, request, or success state before passing the gate.";
+  }
+  if (/console|network|request/i.test(failure)) {
+    return "Audit console and network activity during browser QA and treat uncaught errors or failed critical requests as blocking issues.";
+  }
+  if (/artifact/i.test(failure)) {
+    return "Do not advance the pipeline until the required report artifact exists on disk and contains the expected sections.";
+  }
+  return "Turn this failure into an explicit upfront guardrail and verify it before moving to the next agent.";
 }
 
 function mapGateToCategory(gate: string): Lesson["category"] {

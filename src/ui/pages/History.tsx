@@ -29,7 +29,13 @@ const statusIcon: Record<string, React.ReactNode> = {
 };
 
 export default function History() {
-  const { data: rawProjects } = useProjects();
+  const {
+    data: rawProjects,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useProjects();
   const projects = (rawProjects ?? []) as Project[];
   const queryClient = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
@@ -46,7 +52,23 @@ export default function History() {
     <div className="max-w-3xl mx-auto p-8">
       <h1 className="text-2xl font-bold mb-6 gradient-text">Project History</h1>
 
-      {projects.length === 0 ? (
+      {isLoading ? (
+        <div className="glass-card p-8 text-neutral-500 text-center animate-pulse">
+          Loading projects...
+        </div>
+      ) : isError ? (
+        <div className="glass-card p-6 text-center space-y-3">
+          <div className="text-sm text-red-400">
+            {(error as Error).message || "Failed to load projects."}
+          </div>
+          <button
+            onClick={() => refetch()}
+            className="btn-primary px-4 py-2 text-sm"
+          >
+            Retry
+          </button>
+        </div>
+      ) : projects.length === 0 ? (
         <div className="glass-card p-8 text-neutral-500 text-center">
           No projects yet. Start one from the{" "}
           <Link to="/new" className="text-violet-400 underline">
@@ -77,7 +99,6 @@ export default function History() {
                   {p.status}
                 </span>
               </Link>
-              {/* Delete button — appears on hover */}
               <button
                 onClick={(e) => {
                   e.preventDefault();
@@ -94,58 +115,64 @@ export default function History() {
         </div>
       )}
 
-      {/* Delete confirmation modal */}
       {confirmDelete && (
-        <div
-          className="fixed inset-0 flex items-center justify-center z-50"
-          style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-          onClick={() => setConfirmDelete(null)}
-        >
-          <div
-            className="glass-card max-w-md w-full mx-4"
-            style={{ background: "rgba(20,15,35,0.97)", borderColor: "rgba(239,68,68,0.3)", boxShadow: "0 0 40px rgba(239,68,68,0.15), 0 16px 48px rgba(0,0,0,0.5)" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start gap-3 mb-4">
-              <div className="p-2 rounded-lg bg-red-400/10 shrink-0">
-                <AlertTriangle className="w-5 h-5 text-red-400" />
-              </div>
-              <div>
-                <h2 className="font-semibold text-neutral-100">Delete project?</h2>
-                <p className="text-sm text-neutral-400 mt-1">
-                  This will permanently delete <strong className="text-neutral-200">{confirmDelete.config.name}</strong> and its project folder.
-                </p>
+        (() => {
+          const isExistingProject = confirmDelete.config.mode === "existing";
+          return (
+            <div
+              className="fixed inset-0 flex items-center justify-center z-50"
+              style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+              onClick={() => setConfirmDelete(null)}
+            >
+              <div
+                className="glass-card max-w-md w-full mx-4"
+                style={{ background: "rgba(20,15,35,0.97)", borderColor: "rgba(239,68,68,0.3)", boxShadow: "0 0 40px rgba(239,68,68,0.15), 0 16px 48px rgba(0,0,0,0.5)" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="p-2 rounded-lg bg-red-400/10 shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-red-400" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-neutral-100">Delete project?</h2>
+                    <p className="text-sm text-neutral-400 mt-1">
+                      {isExistingProject
+                        ? <>This will permanently delete Orchestra history for <strong className="text-neutral-200">{confirmDelete.config.name}</strong>. The existing project folder will be preserved.</>
+                        : <>This will permanently delete <strong className="text-neutral-200">{confirmDelete.config.name}</strong> and its project folder.</>}
+                    </p>
+                  </div>
+                </div>
+
+                {confirmDelete.config.workingDir && (
+                  <div className="mb-4 p-3 rounded-lg bg-red-400/5 border border-red-400/20">
+                    <p className="text-xs text-neutral-500 mb-1">{isExistingProject ? "Existing repo path (preserved):" : "Project folder to be deleted:"}</p>
+                    <code className={`text-xs break-all ${isExistingProject ? "text-neutral-300" : "text-red-300"}`}>{confirmDelete.config.workingDir}</code>
+                  </div>
+                )}
+
+                <p className="text-xs text-neutral-500 mb-5">{isExistingProject ? "This removes Orchestra's saved run and event history only." : "This action cannot be undone."}</p>
+
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setConfirmDelete(null)}
+                    className="glass-card text-sm px-4 py-2 cursor-pointer"
+                    style={{ padding: "0.5rem 1rem" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => deleteMutation.mutate(confirmDelete.id)}
+                    disabled={deleteMutation.isPending}
+                    className="text-sm px-4 py-2 rounded-xl font-medium text-white cursor-pointer disabled:opacity-50"
+                    style={{ background: "linear-gradient(135deg, #dc2626, #b91c1c)", boxShadow: "0 2px 12px rgba(220,38,38,0.3)" }}
+                  >
+                    {deleteMutation.isPending ? "Deleting..." : isExistingProject ? "Delete history" : "Delete project"}
+                  </button>
+                </div>
               </div>
             </div>
-
-            {confirmDelete.config.workingDir && (
-              <div className="mb-4 p-3 rounded-lg bg-red-400/5 border border-red-400/20">
-                <p className="text-xs text-neutral-500 mb-1">Project folder to be deleted:</p>
-                <code className="text-xs text-red-300 break-all">{confirmDelete.config.workingDir}</code>
-              </div>
-            )}
-
-            <p className="text-xs text-neutral-500 mb-5">This action cannot be undone.</p>
-
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setConfirmDelete(null)}
-                className="glass-card text-sm px-4 py-2 cursor-pointer"
-                style={{ padding: "0.5rem 1rem" }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => deleteMutation.mutate(confirmDelete.id)}
-                disabled={deleteMutation.isPending}
-                className="text-sm px-4 py-2 rounded-xl font-medium text-white cursor-pointer disabled:opacity-50"
-                style={{ background: "linear-gradient(135deg, #dc2626, #b91c1c)", boxShadow: "0 2px 12px rgba(220,38,38,0.3)" }}
-              >
-                {deleteMutation.isPending ? "Deleting..." : "Delete project"}
-              </button>
-            </div>
-          </div>
-        </div>
+          );
+        })()
       )}
     </div>
   );

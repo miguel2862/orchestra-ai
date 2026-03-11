@@ -84,15 +84,30 @@ const PIPELINE_EDGES: [string, string][] = [
 
 // Quality gates that can feed back to developer
 const FEEDBACK_GATES = ["error_checker", "tester", "reviewer", "deployer", "visual_tester"];
+const PARALLEL_AGENT_GROUPS = [
+  new Set(["developer", "database"]),
+  new Set(["error_checker", "security"]),
+];
+
+function canAgentsRunTogether(a: string, b: string): boolean {
+  if (a === b) return true;
+  return PARALLEL_AGENT_GROUPS.some((group) => group.has(a) && group.has(b));
+}
+
 
 // ── Timer ─────────────────────────────────────────────────────
-function useElapsed(startedAt?: number, active?: boolean) {
+function useElapsed(startedAt?: number, active?: boolean, freezeAt?: number) {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    if (!active || !startedAt) { setElapsed(0); return; }
+    if (!startedAt) { setElapsed(0); return; }
+    if (!active) {
+      setElapsed(Math.max(0, Math.floor(((freezeAt ?? Date.now()) - startedAt) / 1000)));
+      return;
+    }
+    setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
     const iv = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
     return () => clearInterval(iv);
-  }, [active, startedAt]);
+  }, [active, startedAt, freezeAt]);
   return elapsed;
 }
 function fmtTime(s: number) { return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; }
@@ -260,11 +275,12 @@ function PipelineEdges({ states, feedbackLoops, isRunning }: { states: Map<strin
 }
 
 // ── Agent card (absolute positioned) ─────────────────────────
-function AgentCard({ agent, state, isHub = false }: { agent: AgentDef; state: AgentState; isHub?: boolean }) {
-  const isActive    = state.status === "active";
+function AgentCard({ agent, state, projectRunning, freezeAt, isHub = false }: { agent: AgentDef; state: AgentState; projectRunning: boolean; freezeAt?: number; isHub?: boolean }) {
+  const isLiveActive = state.status === "active" && projectRunning;
+  const isFrozen    = state.status === "active" && !projectRunning;
   const isDone      = state.status === "completed";
   const isFailed    = state.status === "failed";
-  const elapsed     = useElapsed(state.startedAt, isActive);
+  const elapsed     = useElapsed(state.startedAt, isLiveActive, freezeAt);
   const w           = isHub ? HUB_W : SPOKE_W;
   const h           = isHub ? HUB_H : SPOKE_H;
   const iconSize    = isHub ? 20 : 16;
@@ -276,20 +292,23 @@ function AgentCard({ agent, state, isHub = false }: { agent: AgentDef; state: Ag
       borderRadius: isHub ? "1rem" : "0.875rem",
       padding: isHub ? "0.65rem 0.5rem" : "0.5rem 0.4rem",
       display: "flex", flexDirection: "column", alignItems: "center",
-      background: isActive
+      background: isLiveActive
         ? `linear-gradient(145deg, ${agent.bg}, rgba(0,0,0,0.25))`
+        : isFrozen ? "linear-gradient(145deg, rgba(245,158,11,0.06), rgba(0,0,0,0.18))"
         : isDone ? "linear-gradient(145deg, rgba(16,185,129,0.06), rgba(0,0,0,0.2))"
         : isFailed ? "linear-gradient(145deg, rgba(239,68,68,0.06), rgba(0,0,0,0.2))"
-        : isHub ? "linear-gradient(145deg, rgba(167,139,250,0.04), rgba(0,0,0,0.3))"
-        : "linear-gradient(145deg, rgba(255,255,255,0.02), rgba(0,0,0,0.18))",
+        : isHub ? "linear-gradient(145deg, rgba(167,139,250,0.08), rgba(0,0,0,0.3))"
+        : "linear-gradient(145deg, rgba(255,255,255,0.05), rgba(0,0,0,0.18))",
       border: `${isHub ? 1.5 : 1}px solid ${
-        isActive ? agent.color + "44"
+        isLiveActive ? agent.color + "44"
+        : isFrozen ? "rgba(245,158,11,0.22)"
         : isDone ? "rgba(16,185,129,0.2)"
         : isFailed ? "rgba(239,68,68,0.2)"
-        : isHub ? "rgba(167,139,250,0.12)"
-        : "rgba(255,255,255,0.05)"}`,
-      boxShadow: isActive
+        : isHub ? "rgba(167,139,250,0.2)"
+        : "rgba(255,255,255,0.1)"}`,
+      boxShadow: isLiveActive
         ? `0 0 ${isHub ? 32 : 20}px ${agent.color}22, 0 4px 20px rgba(0,0,0,0.35)`
+        : isFrozen ? "0 0 12px rgba(245,158,11,0.08), 0 4px 16px rgba(0,0,0,0.24)"
         : isDone ? `0 0 14px rgba(16,185,129,0.08), 0 4px 16px rgba(0,0,0,0.25)`
         : isHub ? "0 8px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)"
         : "0 4px 14px rgba(0,0,0,0.2)",
@@ -297,37 +316,37 @@ function AgentCard({ agent, state, isHub = false }: { agent: AgentDef; state: Ag
       overflow: "hidden",
     }}>
       {/* Shimmer */}
-      {isActive && (
+      {isLiveActive && (
         <div style={{ position: "absolute", inset: 0, background: `linear-gradient(110deg, transparent 30%, ${agent.color}08 50%, transparent 70%)`, backgroundSize: "200% 100%", animation: "shimmer 2.5s ease-in-out infinite" }} />
       )}
       {/* Hub glow ring */}
-      {isHub && isActive && (
+      {isHub && isLiveActive && (
         <div style={{ position: "absolute", inset: -4, borderRadius: "1.25rem", border: `1px solid ${agent.color}30`, animation: "ping-ring 2s ease-out infinite" }} />
       )}
 
       <div className="relative z-10 flex flex-col items-center gap-1">
         {/* Icon with ring */}
         <div style={{ position: "relative", width: iconSize + 16, height: iconSize + 16 }}>
-          {isActive && (
+          {isLiveActive && (
             <div className="absolute inset-0 rounded-full" style={{ border: `1.5px solid ${agent.color}`, animation: "ping-ring 2.5s ease-out infinite" }} />
           )}
           <svg width={iconSize + 16} height={iconSize + 16} className="absolute inset-0" style={{ transform: "rotate(-90deg)" }}>
             {/* Track ring — always fully visible */}
             <circle cx={(iconSize + 16) / 2} cy={(iconSize + 16) / 2} r={ringR} fill="none"
-              stroke={isDone ? "rgba(16,185,129,0.15)" : isFailed ? "rgba(239,68,68,0.15)" : isActive ? agent.color + "25" : agent.color + "18"}
+              stroke={isDone ? "rgba(16,185,129,0.15)" : isFailed ? "rgba(239,68,68,0.15)" : isLiveActive ? agent.color + "25" : isFrozen ? "rgba(245,158,11,0.18)" : agent.color + "28"}
               strokeWidth={1.5}
             />
             {/* Progress arc — full circle always, spins when active */}
             <circle cx={(iconSize + 16) / 2} cy={(iconSize + 16) / 2} r={ringR} fill="none"
-              stroke={isDone ? "#10b981" : isFailed ? "#ef4444" : isActive ? agent.color : agent.color + "38"}
-              strokeWidth={isActive ? 1.8 : 1.5}
+              stroke={isDone ? "#10b981" : isFailed ? "#ef4444" : isLiveActive ? agent.color : isFrozen ? "#f59e0b" : agent.color + "38"}
+              strokeWidth={isLiveActive ? 1.8 : 1.5}
               strokeDasharray={2 * Math.PI * ringR}
               strokeDashoffset={0}
               strokeLinecap="round"
-              style={{ transition: "stroke 0.8s ease, stroke-width 0.4s ease", ...(isActive ? { animation: "ring-spin 3s linear infinite", filter: `drop-shadow(0 0 4px ${agent.color}88)` } : {}) }}
+              style={{ transition: "stroke 0.8s ease, stroke-width 0.4s ease", ...(isLiveActive ? { animation: "ring-spin 3s linear infinite", filter: `drop-shadow(0 0 4px ${agent.color}88)` } : {}) }}
             />
           </svg>
-          <div className="absolute inset-0 flex items-center justify-center" style={{ fontSize: iconSize - 2, filter: isActive ? `drop-shadow(0 0 8px ${agent.color})` : "none" }}>
+          <div className="absolute inset-0 flex items-center justify-center" style={{ fontSize: iconSize - 2, filter: isLiveActive ? `drop-shadow(0 0 8px ${agent.color})` : "none" }}>
             {isDone ? <span style={{ color: "#10b981", fontWeight: 900, fontSize: iconSize - 4 }}>✓</span>
               : isFailed ? <span style={{ color: "#ef4444", fontWeight: 900, fontSize: iconSize - 4 }}>✗</span>
               : agent.icon}
@@ -336,12 +355,12 @@ function AgentCard({ agent, state, isHub = false }: { agent: AgentDef; state: Ag
 
         {/* Name */}
         <div style={{ fontSize: isHub ? 12 : 10, fontWeight: 700, letterSpacing: "-0.01em",
-          color: isActive ? agent.color : isDone ? "#10b981" : isFailed ? "#ef4444" : isHub ? "#9b9bc0" : "#6b6b88",
-          textShadow: isActive ? `0 0 10px ${agent.color}44` : "none",
+          color: isLiveActive ? agent.color : isFrozen ? "#f59e0b" : isDone ? "#10b981" : isFailed ? "#ef4444" : isHub ? "#c4b5fd" : "#a5b4fc",
+          textShadow: isLiveActive ? `0 0 10px ${agent.color}44` : "none",
           transition: "color 0.4s ease", textAlign: "center", lineHeight: 1.2 }}>
           {agent.name}
         </div>
-        <div style={{ fontSize: 7.5, color: "rgba(255,255,255,0.22)", textAlign: "center", lineHeight: 1.1 }}>{agent.role}</div>
+        <div style={{ fontSize: 7.5, color: "rgba(255,255,255,0.38)", textAlign: "center", lineHeight: 1.1 }}>{agent.role}</div>
 
         {/* Retry badge */}
         {state.retryCount > 0 && (
@@ -351,14 +370,14 @@ function AgentCard({ agent, state, isHub = false }: { agent: AgentDef; state: Ag
         )}
 
         {/* Timer */}
-        {isActive && (
-          <div style={{ fontSize: 8, fontFamily: "ui-monospace, monospace", color: agent.color, opacity: 0.9 }}>
-            {fmtTime(elapsed)}
+        {(isLiveActive || isFrozen) && (
+          <div style={{ fontSize: 8, fontFamily: "ui-monospace, monospace", color: isFrozen ? "#f59e0b" : agent.color, opacity: 0.9 }}>
+            {fmtTime(elapsed)}{isFrozen ? " paused" : ""}
           </div>
         )}
 
         {/* Active action */}
-        {isActive && state.recentActions.length > 0 && (
+        {(isLiveActive || isFrozen) && state.recentActions.length > 0 && (
           <div style={{ fontSize: 7, color: "rgba(163,163,163,0.5)", fontFamily: "ui-monospace,monospace", maxWidth: w - 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {state.recentActions[state.recentActions.length - 1].split(":")[0]}
           </div>
@@ -371,23 +390,65 @@ function AgentCard({ agent, state, isHub = false }: { agent: AgentDef; state: Ag
 // ── Main Component ────────────────────────────────────────────
 export default function AgentPipeline({ events, status }: AgentPipelineProps) {
   const isRunning = status === "running";
+  const freezeAt = status === "running"
+    ? undefined
+    : [...events].reverse().find((event) => event.type === "project_completed" || event.type === "project_error")?.timestamp
+      ?? events[events.length - 1]?.timestamp;
 
   const { agentStates, feedbackLoops } = useMemo(() => {
     const states = new Map<string, AgentState>();
-    AGENTS.forEach((a) => states.set(a.id, { status: "idle", recentActions: [], retryCount: 0 }));
+    const activeTaskIdsByAgent = new Map<string, Set<string>>();
+    AGENTS.forEach((a) => {
+      states.set(a.id, { status: "idle", recentActions: [], retryCount: 0 });
+      activeTaskIdsByAgent.set(a.id, new Set());
+    });
     const loops: FeedbackLoop[] = [];
+
+    const settleIncompatibleAgents = (currentAgentId: string) => {
+      for (const [agentId, state] of states.entries()) {
+        if (agentId === currentAgentId || state.status !== "active") continue;
+        if (canAgentsRunTogether(agentId, currentAgentId)) continue;
+        activeTaskIdsByAgent.set(agentId, new Set());
+        states.set(agentId, {
+          ...state,
+          status: "completed",
+          activeLoop: undefined,
+        });
+      }
+    };
 
     for (const event of events) {
       if (event.type === "subagent_started") {
         const id = event.data.agent;
         const prev = states.get(id);
+        const activeTasks = activeTaskIdsByAgent.get(id) ?? new Set<string>();
         const isRetry = prev?.status === "completed" || prev?.status === "failed";
-        states.set(id, { status: "active", currentAction: event.data.description, recentActions: prev?.recentActions ?? [], startedAt: event.timestamp, retryCount: (prev?.retryCount ?? 0) + (isRetry ? 1 : 0), activeLoop: prev?.activeLoop });
+        settleIncompatibleAgents(id);
+        activeTasks.add(event.data.taskId);
+        activeTaskIdsByAgent.set(id, activeTasks);
+        states.set(id, {
+          status: "active",
+          currentAction: event.data.description,
+          recentActions: prev?.recentActions ?? [],
+          startedAt: prev?.status === "active" && prev.startedAt ? prev.startedAt : event.timestamp,
+          retryCount: (prev?.retryCount ?? 0) + (isRetry ? 1 : 0),
+          activeLoop: prev?.activeLoop,
+        });
       }
       if (event.type === "subagent_completed") {
         const id = event.data.agent;
         const prev = states.get(id);
-        states.set(id, { status: event.data.success ? "completed" : "failed", recentActions: prev?.recentActions ?? [], retryCount: prev?.retryCount ?? 0, activeLoop: undefined });
+        const activeTasks = activeTaskIdsByAgent.get(id) ?? new Set<string>();
+        activeTasks.delete(event.data.taskId);
+        activeTaskIdsByAgent.set(id, activeTasks);
+        const hasRemainingTasks = activeTasks.size > 0;
+        states.set(id, {
+          status: hasRemainingTasks ? "active" : event.data.success ? "completed" : "failed",
+          recentActions: prev?.recentActions ?? [],
+          retryCount: prev?.retryCount ?? 0,
+          startedAt: hasRemainingTasks ? prev?.startedAt : undefined,
+          activeLoop: hasRemainingTasks ? prev?.activeLoop : undefined,
+        });
       }
       if (event.type === "feedback_loop_started") {
         const toState = states.get(event.data.toAgent);
@@ -433,16 +494,16 @@ export default function AgentPipeline({ events, status }: AgentPipelineProps) {
 
   return (
     <div data-theme="dark" className="animate-slide-in" style={{
-      borderRadius: "1rem", border: "1px solid rgba(255,255,255,0.07)",
-      background: "linear-gradient(145deg, rgba(139,92,246,0.015) 0%, rgba(0,0,0,0.4) 100%)",
+      borderRadius: "1rem", border: "1px solid rgba(255,255,255,0.1)",
+      background: "linear-gradient(145deg, rgba(139,92,246,0.04) 0%, rgba(0,0,0,0.38) 100%)",
       boxShadow: "0 4px 24px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.2)",
       backdropFilter: "blur(12px)", padding: "1.25rem", overflow: "hidden",
     }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3 relative z-10">
         <div className="flex items-center gap-2.5">
-          <span className="text-sm font-bold gradient-text">Agent Pipeline</span>
-          <span className="text-[9px] text-neutral-600 font-medium">Hub-and-Spoke · Developer is hub</span>
+          <span className="text-sm font-bold text-violet-200">Agent Pipeline</span>
+          <span className="text-[9px] text-neutral-500 font-medium">Hub-and-Spoke · Developer is hub</span>
           {isRunning && activeCount > 0 && (
             <div className="flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-0.5 rounded-full animate-slide-in" style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.15)", color: "#a78bfa" }}>
               <span className="inline-block rounded-full animate-pulse-dot" style={{ width: 5, height: 5, background: "#a78bfa", boxShadow: "0 0 8px rgba(167,139,250,0.9)" }} />
@@ -466,7 +527,7 @@ export default function AgentPipeline({ events, status }: AgentPipelineProps) {
             </div>
           )}
         </div>
-        <div className="text-[10px] text-neutral-500 font-mono">{completedCount}/{AGENTS.length}</div>
+        <div className="text-[10px] text-neutral-400 font-mono">{completedCount}/{AGENTS.length}</div>
       </div>
 
       {/* ── Star layout (desktop) ─────────────────────────────── */}
@@ -494,7 +555,7 @@ export default function AgentPipeline({ events, status }: AgentPipelineProps) {
                 top: `${((pos.y - h / 2) / CH) * 100}%`,
                 width: `${(w / CW) * 100}%`,
               }}>
-                <AgentCard agent={agent} state={getState(agent.id)} isHub={isHub} />
+                <AgentCard agent={agent} state={getState(agent.id)} projectRunning={isRunning} freezeAt={freezeAt} isHub={isHub} />
               </div>
             );
           })}
@@ -512,7 +573,8 @@ export default function AgentPipeline({ events, status }: AgentPipelineProps) {
       <div className="lg:hidden space-y-1.5">
         {AGENTS.map((agent) => {
           const state = getState(agent.id);
-          const isActive = state.status === "active";
+          const isActive = state.status === "active" && isRunning;
+          const isPaused = state.status === "active" && !isRunning;
           const isDone   = state.status === "completed";
           const isFailed = state.status === "failed";
           return (
@@ -520,10 +582,11 @@ export default function AgentPipeline({ events, status }: AgentPipelineProps) {
               <span style={{ fontSize: 14, filter: isActive ? `drop-shadow(0 0 6px ${agent.color})` : "none" }}>
                 {isDone ? "✅" : isFailed ? "❌" : agent.icon}
               </span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: isActive ? agent.color : isDone ? "#10b981" : isFailed ? "#ef4444" : "#525252" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: isActive ? agent.color : isPaused ? "#f59e0b" : isDone ? "#10b981" : isFailed ? "#ef4444" : "#525252" }}>
                 {agent.name}
               </span>
               {isActive && <span className="text-[9px] text-neutral-600 animate-pulse">working…</span>}
+              {isPaused && <span className="text-[9px] text-amber-500">paused</span>}
             </div>
           );
         })}

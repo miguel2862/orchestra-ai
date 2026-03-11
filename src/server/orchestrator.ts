@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage, SDKAssistantMessage, SDKSystemMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -7,14 +8,81 @@ import { broadcast } from "./websocket.js";
 import { loadConfig } from "./config.js";
 import { getTemplate } from "./templates.js";
 import { buildMcpServerConfig } from "./mcp.js";
-import { createProject, updateProject, appendProjectEvent } from "./project-store.js";
+import { createProject, updateProject, appendProjectEvent, getProject } from "./project-store.js";
 import { initGitRepo, commitTask } from "./git-manager.js";
 import { estimateCost } from "./cost-tracker.js";
-import { formatLessonsForPrompt, extractLessonsFromRun, extractLessonsFromFeedback, extractLessonsFromFeedbackLoops } from "./lessons.js";
+import { formatLessonsForPrompt, extractLessonsFromRun, extractLessonsFromFeedback, extractLessonsFromFeedbackLoops, extractLessonsFromRuntimeFailures } from "./lessons.js";
 import type { ProjectConfig, Project, ModelId, AgentModelAlias, AgentRunStat } from "../shared/types.js";
 
 const activeProjects = new Map<string, { close: () => void }>();
 const pendingContinue = new Set<string>();
+const stoppingProjects = new Set<string>();
+const PLAYWRIGHT_BROWSER_TOOLS: string[] = [
+  "browser_navigate",
+  "browser_snapshot",
+  "browser_click",
+  "browser_type",
+  "browser_wait_for",
+  "browser_console_messages",
+  "browser_network_requests",
+  "browser_take_screenshot",
+  "mcp__playwright__browser_navigate",
+  "mcp__playwright__browser_snapshot",
+  "mcp__playwright__browser_click",
+  "mcp__playwright__browser_type",
+  "mcp__playwright__browser_wait_for",
+  "mcp__playwright__browser_console_messages",
+  "mcp__playwright__browser_network_requests",
+  "mcp__playwright__browser_take_screenshot",
+];
+const ORCHESTRATOR_ALLOWED_TOOLS: string[] = [
+  "Read",
+  "Write",
+  "Edit",
+  "Bash",
+  "Glob",
+  "Grep",
+  "Task",
+  "TodoWrite",
+  "WebSearch",
+  "WebFetch",
+  ...PLAYWRIGHT_BROWSER_TOOLS,
+];
+const REQUIRED_AGENT_ARTIFACTS: Partial<Record<string, string[]>> = {
+  product_manager: ["PRD.md"],
+  architect: ["ARCHITECTURE.md"],
+  visual_tester: ["VISUAL_TEST_REPORT.md"],
+};
+const REQUIRED_PIPELINE_AGENTS: string[] = [
+  "product_manager",
+  "architect",
+  "developer",
+  "security",
+  "error_checker",
+  "tester",
+  "reviewer",
+  "deployer",
+  "visual_tester",
+];
+const DEFAULT_SUBAGENT_STALL_TIMEOUT_MS = 10 * 60 * 1000;
+const SUBAGENT_STALL_TIMEOUT_BY_AGENT_MS: Record<string, number> = {
+  product_manager: 8 * 60 * 1000,
+  architect: 15 * 60 * 1000,
+  developer: 15 * 60 * 1000,
+  database: 12 * 60 * 1000,
+  security: 8 * 60 * 1000,
+  error_checker: 10 * 60 * 1000,
+  tester: 10 * 60 * 1000,
+  reviewer: 10 * 60 * 1000,
+  deployer: 10 * 60 * 1000,
+  visual_tester: 12 * 60 * 1000,
+};
+
+interface TaskEvidence {
+  usedTools: Set<string>;
+  toolCounts: Record<string, number>;
+  textSnippets: string[];
+}
 
 // Broadcast + persist to event log (skips task_progress to avoid bloat)
 function emit(projectId: string, event: Parameters<typeof broadcast>[0]): void {
@@ -79,9 +147,14 @@ function saveRunMemory(workingDir: string, memory: RunMemory): void {
 // ── .orchestrarc ──────────────────────────────────────────────────────────────
 
 interface OrchestraRC {
-  pipeline?: { enabledAgents?: string[] };
-  agents?: Record<string, { model?: string; thinkingBudget?: number }>;
-  stack?: { conventions?: Record<string, string> };
+  pipeline?: { enabledAgents?: string[]; subagentStallTimeoutMs?: number };
+  agents?: Record<string, { model?: string; thinkingBudget?: number; stallTimeoutMs?: number }>;
+  stack?: {
+    conventions?: Record<string, string>;
+    enabledGuards?: string[];
+    disabledGuards?: string[];
+    guardrails?: string[];
+  };
 }
 
 function loadOrchestraRC(workingDir: string): OrchestraRC {
@@ -90,24 +163,335 @@ function loadOrchestraRC(workingDir: string): OrchestraRC {
   try { return JSON.parse(readFileSync(rcPath, "utf-8")); } catch { return {}; }
 }
 
+function getProjectMode(projectConfig: ProjectConfig): "new" | "existing" {
+  return projectConfig.mode === "existing" ? "existing" : "new";
+}
+
+function getSubagentStallTimeoutMs(agent: string, rc: OrchestraRC): number {
+  const agentOverride = rc.agents?.[agent]?.stallTimeoutMs;
+  if (typeof agentOverride === "number" && agentOverride > 0) return agentOverride;
+
+  const pipelineOverride = rc.pipeline?.subagentStallTimeoutMs;
+  if (typeof pipelineOverride === "number" && pipelineOverride > 0) return pipelineOverride;
+
+  return SUBAGENT_STALL_TIMEOUT_BY_AGENT_MS[agent] || DEFAULT_SUBAGENT_STALL_TIMEOUT_MS;
+}
+
 // ── Database detection ────────────────────────────────────────────────────────
 
 function projectUsesDatabase(projectConfig: ProjectConfig): boolean {
-  const combined = [projectConfig.techStack, projectConfig.businessNeed, projectConfig.technicalApproach].join(" ").toLowerCase();
+  const combined = [
+    projectConfig.techStack,
+    projectConfig.businessNeed,
+    projectConfig.technicalApproach,
+    projectConfig.currentState,
+  ].join(" ").toLowerCase();
   return /postgres|mysql|sqlite|mongodb|supabase|prisma|drizzle|sequelize|typeorm|\bdatabase\b|\bdb\b|\bsql\b/.test(combined);
+}
+
+function buildProjectContext(projectConfig: ProjectConfig): string {
+  return [
+    projectConfig.template,
+    projectConfig.techStack,
+    projectConfig.businessNeed,
+    projectConfig.technicalApproach,
+    projectConfig.currentState,
+  ].join(" ").toLowerCase();
+}
+
+interface StackGuard {
+  id: string;
+  title: string;
+  instructions: string[];
+  matches: (context: string) => boolean;
+}
+
+const BUILT_IN_STACK_GUARDS: StackGuard[] = [
+  {
+    id: "react_rendering",
+    title: "React Rendering",
+    matches: (context) => /react|next|vite|tsx|jsx|frontend|dashboard|landing page|web app/.test(context),
+    instructions: [
+      "Dynamic list rendering must use stable domain keys. Never rely on raw array index keys for mutable lists.",
+      "Every changed data-driven view must have explicit loading, error, and empty states.",
+      "Effects, subscriptions, and timers must be cleaned up and dependency arrays must be intentional.",
+    ],
+  },
+  {
+    id: "motion_accessibility",
+    title: "Motion Accessibility",
+    matches: (context) => /react|next|vite|tailwind|frontend|ui|landing page|web app/.test(context),
+    instructions: [
+      "Respect prefers-reduced-motion. Smooth scrolling and heavy animation only run under prefers-reduced-motion: no-preference.",
+      "Any scroll-smooth or animation utilities must degrade cleanly for reduced-motion users.",
+    ],
+  },
+  {
+    id: "map_data_validation",
+    title: "Map Data Validation",
+    matches: (context) => /leaflet|mapbox|maplibre|openlayers|geojson|marker|cluster|lat|lng|\bmap\b/.test(context),
+    instructions: [
+      "Validate coordinates before creating markers, clusters, heat points, or tree points. Skip invalid records before marker creation.",
+      "Centralize map point normalization so lat/lng guards are reused across all map layers instead of duplicated.",
+      "Map UIs must default to light tiles unless the user explicitly requests a dark basemap.",
+    ],
+  },
+  {
+    id: "nextjs_boundaries",
+    title: "Next.js Boundaries",
+    matches: (context) => /next|next\.js|app router|route handler|server component|client component/.test(context),
+    instructions: [
+      "Preserve server/client boundaries. Do not import server-only modules into client components.",
+      "Follow the repository's existing App Router or Pages Router conventions instead of mixing patterns.",
+    ],
+  },
+  {
+    id: "supabase_safety",
+    title: "Supabase Safety",
+    matches: (context) => /supabase|row level security|\brls\b/.test(context),
+    instructions: [
+      "Never expose service-role secrets to the client. Keep admin actions and privileged env vars server-only.",
+      "Preserve or improve ownership checks and RLS assumptions when changing queries or auth flows.",
+    ],
+  },
+  {
+    id: "api_contracts",
+    title: "API Contract Integrity",
+    matches: (context) => /api|express|fastify|graphql|server|backend|fullstack|next/.test(context),
+    instructions: [
+      "Changed endpoints must keep server/client payload shapes aligned. Update shared types and every consumer together.",
+      "Runtime validation and user-facing error handling must exist on every changed public input boundary.",
+    ],
+  },
+  {
+    id: "visual_smoke_gate",
+    title: "Visual Smoke Gate",
+    matches: (context) => /react|next|vite|frontend|dashboard|landing page|web app|map/.test(context),
+    instructions: [
+      "Changed routes must open in a real browser with zero uncaught console errors before the project can pass.",
+      "Broken visuals, blank screens, failed requests, and dead interactions are blocking issues, not optional polish.",
+    ],
+  },
+];
+
+function formatStackGuardrails(projectConfig: ProjectConfig, rc: OrchestraRC): string {
+  const context = buildProjectContext(projectConfig);
+  const enabled = new Set(rc.stack?.enabledGuards || []);
+  const disabled = new Set(rc.stack?.disabledGuards || []);
+
+  const selected = BUILT_IN_STACK_GUARDS.filter((guard) => {
+    if (disabled.has(guard.id)) return false;
+    return enabled.has(guard.id) || guard.matches(context);
+  });
+
+  const sections: string[] = [];
+
+  if (selected.length > 0) {
+    sections.push("## STACK / PROJECT GUARDRAILS");
+    for (const guard of selected) {
+      sections.push(`- ${guard.title} (${guard.id}): ${guard.instructions.join(" ")}`);
+    }
+  }
+
+  const conventions = rc.stack?.conventions ? Object.entries(rc.stack.conventions) : [];
+  if (conventions.length > 0) {
+    if (sections.length === 0) sections.push("## STACK / PROJECT GUARDRAILS");
+    sections.push("- Repository conventions:");
+    for (const [key, value] of conventions) {
+      sections.push(`  - ${key}: ${value}`);
+    }
+  }
+
+  const customGuardrails = (rc.stack?.guardrails || []).map((guard) => guard.trim()).filter(Boolean);
+  if (customGuardrails.length > 0) {
+    if (sections.length === 0) sections.push("## STACK / PROJECT GUARDRAILS");
+    for (const guard of customGuardrails) {
+      sections.push(`- Custom: ${guard}`);
+    }
+  }
+
+  return sections.length > 0 ? `\n\n${sections.join("\n")}` : "";
+}
+
+function hasRequiredArtifacts(workingDir: string, agent: string): string[] {
+  const requiredFiles = REQUIRED_AGENT_ARTIFACTS[agent] || [];
+  return requiredFiles.filter((file) => !existsSync(join(workingDir, file)));
+}
+
+function hasToolEvidence(usedTools: Iterable<string> | undefined, names: string[]): boolean {
+  if (!usedTools) return false;
+  const used = new Set(usedTools);
+  return names.some((name) => used.has(name));
+}
+
+function countToolEvidence(evidence: TaskEvidence | undefined, names: string[]): number {
+  if (!evidence) return 0;
+  return names.reduce((sum, name) => sum + (evidence.toolCounts[name] || 0), 0);
+}
+
+function usedRequiredBrowserTools(usedTools?: Iterable<string>): boolean {
+  return hasToolEvidence(usedTools, ["browser_navigate", "mcp__playwright__browser_navigate"])
+    && hasToolEvidence(usedTools, ["browser_snapshot", "mcp__playwright__browser_snapshot"]);
+}
+
+function usedVisualTesterInteractionTools(usedTools?: Iterable<string>): boolean {
+  return hasToolEvidence(usedTools, ["browser_click", "mcp__playwright__browser_click", "browser_type", "mcp__playwright__browser_type"]);
+}
+
+function usedVisualTesterDiagnosticTools(usedTools?: Iterable<string>): boolean {
+  return hasToolEvidence(usedTools, ["browser_console_messages", "mcp__playwright__browser_console_messages"])
+    && hasToolEvidence(usedTools, ["browser_take_screenshot", "mcp__playwright__browser_take_screenshot"]);
+}
+
+function getVisualTesterReportFailures(workingDir: string): string[] {
+  const reportPath = join(workingDir, "VISUAL_TEST_REPORT.md");
+  if (!existsSync(reportPath)) return ["VISUAL_TEST_REPORT.md was not written"];
+
+  let report = "";
+  try {
+    report = readFileSync(reportPath, "utf-8").toLowerCase();
+  } catch {
+    return ["VISUAL_TEST_REPORT.md could not be read"];
+  }
+
+  const requiredSections = [
+    "pages tested",
+    "interaction coverage",
+    "console errors",
+    "visual issues",
+    "interactive issues",
+    "design assessment",
+    "verdict",
+  ];
+
+  return requiredSections
+    .filter((section) => !report.includes(section))
+    .map((section) => `VISUAL_TEST_REPORT.md missing section: ${section}`);
+}
+
+function validateSubagentRuntimeGate(agent: string, workingDir: string, evidence?: TaskEvidence): string | null {
+  const missingArtifacts = hasRequiredArtifacts(workingDir, agent);
+  const failures: string[] = [];
+
+  if (missingArtifacts.length > 0) {
+    failures.push(`missing required artifact(s): ${missingArtifacts.join(", ")}`);
+  }
+
+  if (agent === "visual_tester") {
+    if (!usedRequiredBrowserTools(evidence?.usedTools)) {
+      failures.push("visual_tester did not use both browser_navigate and browser_snapshot");
+    }
+    if (!usedVisualTesterInteractionTools(evidence?.usedTools)) {
+      failures.push("visual_tester never proved a real interaction with browser_click or browser_type");
+    }
+    const interactionCount = countToolEvidence(evidence, ["browser_click", "mcp__playwright__browser_click", "browser_type", "mcp__playwright__browser_type"]);
+    if (interactionCount < 3) {
+      failures.push(`visual_tester only performed ${interactionCount} meaningful interaction(s); expected at least 3`);
+    }
+    const snapshotCount = countToolEvidence(evidence, ["browser_snapshot", "mcp__playwright__browser_snapshot"]);
+    if (snapshotCount < 2) {
+      failures.push(`visual_tester only captured ${snapshotCount} browser snapshot(s); expected at least 2`);
+    }
+    if (!usedVisualTesterDiagnosticTools(evidence?.usedTools)) {
+      failures.push("visual_tester did not inspect console output and capture screenshots");
+    }
+    failures.push(...getVisualTesterReportFailures(workingDir));
+  }
+
+  return failures.length > 0 ? failures.join("; ") : null;
+}
+
+function cleanupWorkingDirListeners(workingDir: string): string[] {
+  try {
+    const discoverScript = `WORKDIR=${JSON.stringify(workingDir)}
+lsof -nP -iTCP -sTCP:LISTEN -t 2>/dev/null | while read -r pid; do
+  [ -n "$pid" ] || continue
+  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
+  case "$cwd" in
+    "$WORKDIR"|"$WORKDIR"/*)
+      port=$(lsof -Pan -a -p "$pid" -iTCP -sTCP:LISTEN -Fn 2>/dev/null | sed -n 's/^n.*://p' | head -n1)
+      echo "$pid:$port"
+      ;;
+  esac
+done | sort -u`;
+    const discovered = execSync(`bash -lc ${JSON.stringify(discoverScript)}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (!discovered) return [];
+
+    const entries = discovered.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const pids = entries.map((entry) => entry.split(":")[0]).filter(Boolean);
+    if (pids.length === 0) return [];
+
+    const cleanupScript = `pids=(${pids.join(" ")})
+kill -TERM ${pids.join(' ')} 2>/dev/null || true
+sleep 1
+for pid in ${pids.join(' ')}; do
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+done`;
+    execSync(`bash -lc ${JSON.stringify(cleanupScript)}`, { stdio: ["ignore", "ignore", "ignore"] });
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+function validateProjectRuntimeGates(
+  workingDir: string,
+  usesDB: boolean,
+  successfulAgents: Set<string>,
+  visualTesterBrowserVerified: boolean,
+): string[] {
+  const failures: string[] = [];
+  const requiredAgents = usesDB ? [...REQUIRED_PIPELINE_AGENTS, "database"] : REQUIRED_PIPELINE_AGENTS;
+
+  for (const agent of requiredAgents) {
+    if (!successfulAgents.has(agent)) {
+      failures.push(`required agent did not complete successfully: ${agent}`);
+    }
+  }
+
+  for (const agent of Object.keys(REQUIRED_AGENT_ARTIFACTS)) {
+    const missingArtifacts = hasRequiredArtifacts(workingDir, agent);
+    if (missingArtifacts.length > 0) {
+      failures.push(`${agent} missing artifact(s): ${missingArtifacts.join(", ")}`);
+    }
+  }
+
+  failures.push(...getVisualTesterReportFailures(workingDir));
+
+  if (!visualTesterBrowserVerified) {
+    failures.push("visual_tester never proved real browser QA with navigation, snapshots, screenshots, console inspection, and at least one interaction");
+  }
+
+  if (!existsSync(join(workingDir, "ORCHESTRA_REPORT.md"))) {
+    failures.push("missing final consolidated report: ORCHESTRA_REPORT.md");
+  }
+
+  return failures;
 }
 
 // ── Shared agent definitions ─────────────────────────────────────────────────
 
 function buildAgentDefinitions(
+  projectConfig: ProjectConfig,
   agentMdl: (id: string) => Record<string, unknown>,
   usesDB: boolean,
   pushGH: boolean,
 ): Record<string, { description: string; prompt: string; tools: string[]; [k: string]: unknown }> {
+  const rc = loadOrchestraRC(projectConfig.workingDir);
+  const stackGuardrails = formatStackGuardrails(projectConfig, rc);
+  const repoModeNote = getProjectMode(projectConfig) === "existing"
+    ? `
+
+## EXISTING REPO MODE
+- This repository already exists. Audit before editing.
+- Prefer minimal diffs and preserve the current structure, conventions, scripts, CI, and design system.
+- Extend existing modules before creating replacements or parallel systems.
+- Treat the orchestrator's preferred commands, scope boundaries, and read-only paths as binding context.${stackGuardrails}`
+    : stackGuardrails;
   const agents: Record<string, { description: string; prompt: string; tools: string[]; [k: string]: unknown }> = {
     product_manager: {
       description: "Senior product manager for requirements analysis, user stories, and PRD creation.",
-      prompt: `You are a senior product manager with 10+ years of experience shipping products used by millions. You translate vague business needs into structured, testable, unambiguous specifications that engineers can implement without further clarification.
+      prompt: `You are a senior product manager with 10+ years of experience shipping products used by millions. You translate vague business needs into structured, testable, unambiguous specifications that engineers can implement without further clarification.${repoModeNote}
 
 ## YOUR MISSION
 Produce a complete PRD.md that becomes the single source of truth for all downstream agents (Architect, Developer, Tester). If it's not in the PRD, it won't get built. If it's vague, it will get built wrong.
@@ -154,21 +538,22 @@ Produce a complete PRD.md that becomes the single source of truth for all downst
 - Include error states and empty states
 
 ### Step 8 — Write to PRD.md
-Write the complete PRD with ALL sections above. This file becomes the authoritative input for the Architect.
+Use the Write tool to create PRD.md with the complete PRD and ALL sections above. This file becomes the authoritative input for the Architect.
 
 ## QUALITY RULES
 - NEVER use vague language: "should handle errors gracefully" → "SHALL display error message with HTTP status code and retry option"
 - NEVER leave requirements without acceptance criteria
 - NEVER skip scope boundaries — OUT OF SCOPE is as important as IN SCOPE
 - If unsure about a requirement, define it with the SIMPLEST reasonable interpretation
-- Think like the user, not the engineer — focus on outcomes, not implementation`,
+- Think like the user, not the engineer — focus on outcomes, not implementation
+- Before finishing, verify that PRD.md exists in the working directory. If it does not exist yet, write it before responding.`,
       tools: ["Read", "Write", "WebSearch", "WebFetch"],
       ...agentMdl("product_manager"),
     },
 
     architect: {
       description: "Senior software architect for system design, file structure, and technical decisions.",
-      prompt: `You are a senior software architect with 15+ years designing production systems. You translate PRDs into complete, implementable architecture documents. The Developer agent will follow your design EXACTLY — every file, every interface, every API contract. If you leave it ambiguous, it will be implemented wrong.
+      prompt: `You are a senior software architect with 15+ years designing production systems. You translate PRDs into complete, implementable architecture documents. The Developer agent will follow your design EXACTLY — every file, every interface, every API contract. If you leave it ambiguous, it will be implemented wrong.${repoModeNote}
 
 ## YOUR MISSION
 Produce ARCHITECTURE.md — a complete blueprint that a Developer agent can implement without asking a single question. Every file, data model, API endpoint, and design decision must be specified.
@@ -236,7 +621,7 @@ Produce ARCHITECTURE.md — a complete blueprint that a Developer agent can impl
 - Environment variables: | Name | Required | Description | Example Value |
 
 ### Step 10 — Write to ARCHITECTURE.md
-Write the complete architecture with ALL sections. This file becomes the authoritative input for the Developer.
+Use the Write tool to create ARCHITECTURE.md with the complete architecture and ALL sections. This file becomes the authoritative input for the Developer.
 
 ## QUALITY RULES
 - NEVER leave a file without a purpose — if you can't explain why it exists, remove it
@@ -245,14 +630,15 @@ Write the complete architecture with ALL sections. This file becomes the authori
 - NEVER use vague descriptions: "a service layer" → "src/services/user.service.ts exports UserService with methods: create(), findById(), update(), delete()"
 - Data models must include ALL fields — the Developer should not have to invent any
 - Every design decision must trace to a PRD requirement
-- Prefer simplicity — the simplest architecture that satisfies all P0 requirements wins`,
+- Prefer simplicity — the simplest architecture that satisfies all P0 requirements wins
+- Before finishing, verify that ARCHITECTURE.md exists in the working directory. If it does not exist yet, write it before responding.`,
       tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
       ...agentMdl("architect"),
     },
 
     developer: {
       description: "Full-stack senior developer for writing all production code. The hub agent — writes every line of code in the project.",
-      prompt: `You are an autonomous senior full-stack developer with 15+ years shipping production systems. You write clean, maintainable, well-tested code that follows SOLID principles. Keep working until the implementation is complete and verified — do not stop at the first sign of difficulty.
+      prompt: `You are an autonomous senior full-stack developer with 15+ years shipping production systems. You write clean, maintainable, well-tested code that follows SOLID principles. Keep working until the implementation is complete and verified — do not stop at the first sign of difficulty.${repoModeNote}
 
 ## ROLE BOUNDARIES
 - Treat PRD.md and ARCHITECTURE.md as authoritative — do NOT reinterpret product goals or redesign the architecture unless the task explicitly asks for it. Your planning is local implementation planning only.
@@ -391,7 +777,7 @@ Your interfaces must look like they were designed by a world-class UI/UX expert.
 
     database: {
       description: "Senior database architect for schema design, migrations, optimization, and seed data.",
-      prompt: `You are a senior database architect with 12+ years designing schemas for production systems handling millions of records. You design correct, performant, maintainable database layers.
+      prompt: `You are a senior database architect with 12+ years designing schemas for production systems handling millions of records. You design correct, performant, maintainable database layers.${repoModeNote}
 
 ## YOUR MISSION
 Produce the complete database layer: schema, migrations, indexes, seed data, and documentation. The Developer will import your schema and models — they must be ready to use without modification.
@@ -475,7 +861,7 @@ Write DATABASE.md with:
 
     security: {
       description: "Senior security engineer for OWASP scanning, hardening, dependency audit, and vulnerability remediation.",
-      prompt: `You are a senior application security engineer with 10+ years specializing in secure code review and vulnerability remediation. You find and FIX security issues — not just report them.
+      prompt: `You are a senior application security engineer with 10+ years specializing in secure code review and vulnerability remediation. You find and FIX security issues — not just report them.${repoModeNote}
 
 ## YOUR MISSION
 Perform a complete security audit of ALL source code and dependencies. Fix all critical and high severity issues. Produce a clear security report. Be THOROUGH but EFFICIENT — focus on real vulnerabilities, not theoretical ones.
@@ -585,7 +971,7 @@ FINAL LINE (required): End your response with EXACTLY one of:
 
     error_checker: {
       description: "Senior build engineer that validates every file, fixes all errors, and ensures the app compiles and runs.",
-      prompt: `You are a senior build engineer with 12+ years ensuring production releases ship clean. Zero tolerance for errors. You don't just find problems — you FIX them and VERIFY the fix works. You iterate until the build is green and the app starts.
+      prompt: `You are a senior build engineer with 12+ years ensuring production releases ship clean. Zero tolerance for errors. You don't just find problems — you FIX them and VERIFY the fix works. You iterate until the build is green and the app starts.${repoModeNote}
 
 ## YOUR MISSION
 Validate the ENTIRE codebase: every file compiles, every import resolves, every dependency installs, the build succeeds, and the app starts without errors. Fix everything you find.
@@ -722,7 +1108,7 @@ FINAL LINE (required): End your response with EXACTLY one of:
 
     tester: {
       description: "Senior QA/SDET engineer for writing and running comprehensive tests with requirement traceability.",
-      prompt: `You are a senior SDET (Software Development Engineer in Test) with 12+ years building test suites for production systems. You don't just write tests — you design a test strategy that catches bugs BEFORE they reach users. Every test traces back to a requirement.
+      prompt: `You are a senior SDET (Software Development Engineer in Test) with 12+ years building test suites for production systems. You don't just write tests — you design a test strategy that catches bugs BEFORE they reach users. Every test traces back to a requirement.${repoModeNote}
 
 ## YOUR MISSION
 Write and run comprehensive tests that verify EVERY requirement in PRD.md. When you're done, the test suite should give the team confidence that the code works correctly.
@@ -812,7 +1198,7 @@ FINAL LINE (required): End your response with EXACTLY one of:
 
     reviewer: {
       description: "Principal engineer doing final code review for correctness, performance, maintainability, and production readiness.",
-      prompt: `You are a principal engineer with 15+ years of experience doing final code reviews at top-tier tech companies. You've reviewed thousands of pull requests. You focus on issues that ACTUALLY MATTER — bugs, performance, security, maintainability — not style bikeshedding.
+      prompt: `You are a principal engineer with 15+ years of experience doing final code reviews at top-tier tech companies. You've reviewed thousands of pull requests. You focus on issues that ACTUALLY MATTER — bugs, performance, security, maintainability — not style bikeshedding.${repoModeNote}
 
 ## YOUR MISSION
 Perform a thorough code review of ALL project files. Fix critical and major issues directly. Write a clear review report. The goal is production-ready code.
@@ -940,7 +1326,8 @@ FINAL LINE (required): End your response with EXACTLY one of:
 
     deployer: {
       description: "DevOps engineer for Docker, CI/CD pipelines, README, and optional GitHub push.",
-      prompt: `You are a senior DevOps engineer. Make this production-ready with full CI/CD rigor.
+      prompt: `You are a senior DevOps engineer. Make this production-ready with full CI/CD rigor.${repoModeNote}
+
 MANDATORY WORKFLOW:
 1. Read ALL project files to understand the stack
 2. Create Dockerfile (multi-stage build, non-root user, health check, .dockerignore)
@@ -966,9 +1353,9 @@ MANDATORY WORKFLOW:
 8. Create any missing configs: .eslintrc / biome.json, .prettierrc, .gitignore
 9. Consolidate all agent reports into a single ORCHESTRA_REPORT.md:
    - Read all markdown report files (ARCHITECTURE.md, SECURITY_REPORT.md, BUILD_VALIDATION_REPORT.md, CODE_REVIEW.md, TEST_REPORT.md, VISUAL_TEST_REPORT.md, DATABASE.md, etc.)
-   - Merge them into ORCHESTRA_REPORT.md with clear ## sections per agent
+   - Use Write/Edit tools to merge them into ORCHESTRA_REPORT.md with clear ## sections per agent
    - Delete the individual report files (keep only README.md and ORCHESTRA_REPORT.md as docs)
-10. VERIFY AND LEAVE THE APP RUNNING:
+10. VERIFY THE APP LOCALLY FOR THE NEXT GATE:
    - Install dependencies if not already installed
    - Detect the correct start command from package.json scripts or ARCHITECTURE.md:
      - For Node.js: prefer \`npm run dev\` (or \`npm start\` if no dev script)
@@ -980,8 +1367,9 @@ MANDATORY WORKFLOW:
    - Hit the main URL with curl to confirm it responds with 200
    - Check server logs for any startup errors
    - If any errors: fix them, restart, verify again
-   - **IMPORTANT: DO NOT kill the process after verification** — leave the app running so the user can immediately open the URL and test it
-   - Report the EXACT URL where the app is running (e.g. "App running at http://localhost:3000" or "App running at http://localhost:5173")${pushGH ? `
+   - Keep the process alive long enough for visual_tester to use it in the same pipeline run
+   - Report the EXACT URL used for verification (e.g. "Verified at http://localhost:3000")
+   - The orchestrator will close temporary local listeners after the pipeline finishes${pushGH ? `
 11. PUSH TO GITHUB: Initialize git if needed, create a new GitHub repository named after the project, commit all files with message "feat: initial production-ready release", push to main branch` : ""}
 
 FINAL LINE (required): End your response with EXACTLY one of:
@@ -993,10 +1381,17 @@ FINAL LINE (required): End your response with EXACTLY one of:
 
     visual_tester: {
       description: "Visual QA engineer that opens the app in a real browser via Playwright to verify it works visually, catches console errors, and validates user interactions.",
-      prompt: `You are a senior visual QA engineer. You test web applications by ACTUALLY OPENING THEM in a real browser using Playwright MCP tools. You don't just read code — you interact with the live app like a real user would.
+      prompt: `You are a senior visual QA engineer. You test web applications by ACTUALLY OPENING THEM in a real browser using Playwright MCP tools. You don't just read code — you interact with the live app like a real user would.${repoModeNote}
 
 ## YOUR MISSION
 Open the running application in a browser and verify it works correctly from a visual and functional perspective. Find issues that code review and unit tests miss: blank screens, missing data, broken layouts, console errors, non-functional buttons.
+
+## HARD GATE
+- You MUST use Playwright MCP browser tools for this task.
+- Required browser evidence before you can pass: browser_navigate, multiple browser_snapshot calls, browser_console_messages, browser_take_screenshot, and repeated browser_click/browser_type interactions across the page.
+- If browser tools such as browser_navigate or browser_snapshot are unavailable, immediately fail with: "QUALITY GATE: FAIL — Playwright MCP browser tools unavailable".
+- If there is no live URL from the deployer or the app does not respond, fail the gate instead of guessing.
+- If a control looks interactive but clicking it produces no navigation, no DOM change, no modal, no request, and no visible state change, that is a FAIL.
 
 ## PHASE 1 — PREPARATION
 1. Read ARCHITECTURE.md to understand the app's pages, routes, and key features
@@ -1017,19 +1412,23 @@ Open the running application in a browser and verify it works correctly from a v
   - Take browser_snapshot to verify content renders
   - Check console for new errors
   - Verify data displays: tables should have rows, charts should have data points, maps should have markers/layers
+  - Cover the page top, mid, and bottom. If no explicit scroll tool exists, use full-page screenshots and repeated snapshots after reaching deeper sections.
 
 ### 2c. Interactive Elements
-- Click buttons and verify they respond (state changes, modals open, forms submit)
-- Test form inputs: type text, select dropdowns, toggle checkboxes
+- Click every major CTA, nav link, tab, accordion, modal trigger, and form control in the changed flows. Minimum: 3 meaningful interactions per run, but do more if the page exposes more controls.
+- After each click or typed interaction, verify an observable effect: URL change, DOM change in browser_snapshot, modal/drawer open, success/error state, or a critical network request
+- Test form inputs: type text, select dropdowns, toggle checkboxes, and confirm the UI reacts
 - Test navigation: all links work, back button works, no dead ends
-- On maps: verify markers/clusters are visible, popups work on click
-- On charts: verify tooltips appear on hover
+- On maps: verify markers/clusters are visible, popups work on click, and changed layers respond to interaction
+- On charts: verify tooltips or drill-down interactions appear on hover/click
+- If an element appears clickable but does nothing, report it as a blocking interactive issue
 
 ### 2d. Visual Quality Checks
 - Verify styles are loaded (not unstyled HTML)
 - Verify images/icons render (no broken image placeholders)
 - Verify text is readable (not overflowing, not clipped, proper contrast)
-- Verify responsive behavior: if possible, check at narrower viewport
+- Judge design quality with a clear rubric: hierarchy, spacing, typography, density, responsiveness, motion polish, and premium feel
+- Verify responsive behavior at a narrower viewport and note any layout regressions
 
 ### 2e. Console Error Audit
 - After visiting all pages, compile all console errors and warnings
@@ -1037,12 +1436,23 @@ Open the running application in a browser and verify it works correctly from a v
 - Focus on: uncaught exceptions, failed network requests, React errors, null/undefined access
 
 ## PHASE 3 — REPORT
-Write VISUAL_TEST_REPORT.md with:
-- Pages tested: list each URL visited and its status
-- Console errors: any JavaScript errors found
-- Visual issues: missing data, broken layouts, unstyled elements
-- Interactive issues: buttons that don't work, forms that don't submit
-- Screenshots/snapshots: describe what was seen on each page
+Use the Write tool to create VISUAL_TEST_REPORT.md with these EXACT sections:
+- ## Pages Tested
+- ## Interaction Coverage
+- ## Console Errors
+- ## Visual Issues
+- ## Interactive Issues
+- ## Design Assessment
+- ## Verdict
+
+Inside the report:
+- Pages Tested: list each URL visited, viewport, and pass/fail status
+- Interaction Coverage: list every major button, link, tab, input, or card you exercised and what happened
+- Console Errors: include uncaught exceptions, failed requests, and important warnings
+- Visual Issues: missing data, broken layouts, unstyled elements, poor responsive behavior
+- Interactive Issues: buttons that don't work, forms that don't submit, dead links, controls with no visible effect
+- Design Assessment: score the changed UI for hierarchy, spacing, typography, motion, responsiveness, and overall polish
+- Verdict: concise pass/fail summary with the blocking reasons if any
 
 ## COMMON ISSUES TO CATCH
 - Blank page on load (React didn't mount, JavaScript error)
@@ -1054,11 +1464,12 @@ Write VISUAL_TEST_REPORT.md with:
 - Forms submitting but nothing happens (missing handler or API endpoint)
 - Links to routes that return 404
 - Duplicate React keys causing wrong element rendering
+- Before finishing, verify that VISUAL_TEST_REPORT.md exists in the working directory. If it does not exist yet, write it before responding.
 
 FINAL LINE (required): End your response with EXACTLY one of:
 "QUALITY GATE: PASS" — app loads, all pages render, no console errors, interactions work
 "QUALITY GATE: FAIL — [issue1]; [issue2]" — visual or functional issues found`,
-      tools: ["Read", "Write", "Glob", "Grep", "Bash"],
+      tools: ["Read", "Write", "Glob", "Grep", "Bash", ...PLAYWRIGHT_BROWSER_TOOLS],
       ...agentMdl("visual_tester"),
     },
   };
@@ -1090,14 +1501,25 @@ export async function startProject(projectConfig: ProjectConfig): Promise<{ proj
   if (!config) throw new Error("No config found. Complete setup first.");
   const projectId = crypto.randomUUID();
   const template = getTemplate(projectConfig.template);
+  const mode = getProjectMode(projectConfig);
+  projectConfig.mode = mode;
 
-  if (!projectConfig.workingDir) {
+  if (mode === "existing") {
+    if (!projectConfig.workingDir) {
+      throw new Error("Existing project path is required.");
+    }
+    if (!existsSync(projectConfig.workingDir)) {
+      throw new Error(`Existing project path not found: ${projectConfig.workingDir}`);
+    }
+  } else if (!projectConfig.workingDir) {
     const base = config.defaultWorkingDir || join(homedir(), "orchestra-projects");
     const safeName = projectConfig.name.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase() || "project";
     projectConfig.workingDir = join(base, safeName);
   }
 
-  mkdirSync(projectConfig.workingDir, { recursive: true });
+  if (mode === "new") {
+    mkdirSync(projectConfig.workingDir, { recursive: true });
+  }
   ensureOrchestraDir(projectConfig.workingDir);
 
   const mcpServers = buildMcpServerConfig(config.mcpServers, projectConfig.workingDir);
@@ -1121,7 +1543,9 @@ export async function startProject(projectConfig: ProjectConfig): Promise<{ proj
   const project: Project = { id: projectId, config: projectConfig, status: "running", createdAt: Date.now(), updatedAt: Date.now() };
   await createProject(project);
 
-  if (projectConfig.gitEnabled) initGitRepo(projectConfig.workingDir);
+  if (projectConfig.gitEnabled && (mode === "new" || !existsSync(join(projectConfig.workingDir, ".git")))) {
+    initGitRepo(projectConfig.workingDir);
+  }
 
   const systemPrompt = buildSystemPrompt(projectConfig, template);
   const prompt = buildPrompt(projectConfig);
@@ -1148,14 +1572,81 @@ async function runAgent(
   let numTurns = 0;
   const activeTaskIds = new Set<string>();
   const taskIdToAgent = new Map<string, string>();
+  const taskEvidence = new Map<string, TaskEvidence>();
+  const taskLastActivityAt = new Map<string, number>();
   const agentStats: Record<string, AgentRunStat> = {};
-  const agentStartTimes = new Map<string, number>();
+  const taskStartTimes = new Map<string, number>();
   const agentMessages: Array<{ agent: string; text: string }> = [];
   const agentCompletionCount = new Map<string, number>();
+  const successfulAgents = new Set<string>();
+  let visualTesterBrowserVerified = false;
   const activeLoops = new Map<string, { fromAgent: string; loopNumber: number; qualityGate: string; reason: string }>();
   const completedLoops: Array<{ qualityGate: string; loopNumber: number; resolved: boolean; reason?: string }> = [];
   const rc = loadOrchestraRC(projectConfig.workingDir);
   const usesDB = projectUsesDatabase(projectConfig);
+  let runFailure: Error | null = null;
+  let stallWatchdog: NodeJS.Timeout | undefined;
+  let liveMessages: { close: () => void } | null = null;
+
+  const finalizeSubagentTask = (taskId: string, taskSuccess: boolean): void => {
+    if (!activeTaskIds.has(taskId)) return;
+
+    const agent = taskIdToAgent.get(taskId) || "unknown";
+    const startedAt = taskStartTimes.get(taskId) || Date.now();
+    const dur = Date.now() - startedAt;
+    const evidence = taskEvidence.get(taskId);
+    const runtimeGateFailure = taskSuccess ? validateSubagentRuntimeGate(agent, projectConfig.workingDir, evidence) : null;
+    const finalSuccess = taskSuccess && !runtimeGateFailure;
+
+    activeTaskIds.delete(taskId);
+    taskStartTimes.delete(taskId);
+    taskLastActivityAt.delete(taskId);
+    taskEvidence.delete(taskId);
+
+    if (!agentStats[agent]) agentStats[agent] = { inputTokens: 0, outputTokens: 0, durationMs: 0 };
+    agentStats[agent].durationMs = (agentStats[agent].durationMs || 0) + dur;
+
+    emit(projectId, { type: "subagent_completed", projectId, timestamp: Date.now(), data: { agent, taskId, success: finalSuccess, durationMs: dur } });
+
+    if (projectConfig.gitEnabled && finalSuccess) commitTask(projectConfig.workingDir, agent);
+
+    agentCompletionCount.set(agent, (agentCompletionCount.get(agent) || 0) + 1);
+
+    if (finalSuccess) {
+      successfulAgents.add(agent);
+      if (agent === "visual_tester") {
+        visualTesterBrowserVerified = true;
+      }
+    }
+
+    if (activeLoops.has(taskId)) {
+      const loop = activeLoops.get(taskId)!;
+      activeLoops.delete(taskId);
+      completedLoops.push({
+        qualityGate: loop.qualityGate,
+        loopNumber: loop.loopNumber,
+        resolved: finalSuccess,
+        reason: runtimeGateFailure || loop.reason,
+      });
+      emit(projectId, {
+        type: "feedback_loop_completed",
+        projectId,
+        timestamp: Date.now(),
+        data: { fromAgent: loop.fromAgent, toAgent: agent, success: finalSuccess, loopNumber: loop.loopNumber, qualityGate: loop.qualityGate },
+      });
+    }
+
+    if (runtimeGateFailure) {
+      try { extractLessonsFromRuntimeFailures({ failures: [runtimeGateFailure], techStack: projectConfig.techStack, agent }); } catch {}
+      emit(projectId, {
+        type: "agent_message",
+        projectId,
+        timestamp: Date.now(),
+        data: { text: `RUNTIME GATE FAIL (${agent}): ${runtimeGateFailure}`, isSubagent: false },
+      });
+      throw new Error(`Runtime gate failed for ${agent}: ${runtimeGateFailure}`);
+    }
+  };
 
   try {
     const mainModel = resolveModel(projectConfig, config);
@@ -1172,22 +1663,57 @@ async function runAgent(
         systemPrompt,
         cwd: projectConfig.workingDir,
         permissionMode: "acceptEdits",
-        allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite", "WebSearch", "WebFetch"],
+        allowedTools: ORCHESTRATOR_ALLOWED_TOOLS,
         maxTurns: config.maxTurns,
         ...(config.anthropicApiKey ? { maxBudgetUsd: config.maxBudgetUsd } : {}),
         ...(thinkingEnabled ? { thinking: { type: "adaptive" as const } } : {}),
         mcpServers,
-        agents: buildAgentDefinitions(agentMdl, usesDB, !!projectConfig.pushToGithub),
+        agents: buildAgentDefinitions(projectConfig, agentMdl, usesDB, !!projectConfig.pushToGithub),
       },
     });
 
     activeProjects.set(projectId, messages);
+    liveMessages = messages;
+    stallWatchdog = setInterval(() => {
+      if (runFailure) return;
+      const now = Date.now();
+      for (const taskId of activeTaskIds) {
+        const lastActivity = taskLastActivityAt.get(taskId) || taskStartTimes.get(taskId) || now;
+        const agent = taskIdToAgent.get(taskId) || "unknown";
+        const stallTimeoutMs = getSubagentStallTimeoutMs(agent, rc);
+        if (now - lastActivity <= stallTimeoutMs) continue;
+        const stallSeconds = Math.round(stallTimeoutMs / 1000);
+        runFailure = new Error(`Subagent stalled: ${agent} exceeded ${stallSeconds}s without activity`);
+        emit(projectId, {
+          type: "agent_message",
+          projectId,
+          timestamp: Date.now(),
+          data: { text: `RUNTIME GATE FAIL (${agent}): stalled for more than ${stallSeconds}s without activity`, isSubagent: false },
+        });
+        liveMessages?.close();
+        break;
+      }
+    }, 5000);
     console.log(`[orchestrator] SDK query started for ${projectId}`);
 
     for await (const message of messages) {
+      if (runFailure) throw runFailure;
       // Handle result message
       if ("type" in message && message.type === "result") {
-        await handleCompletion(projectId, message as SDKResultMessage, startTime, totalCostUsd, numTurns, agentStats, projectConfig, agentMessages, completedLoops);
+        await handleCompletion(
+          projectId,
+          message as SDKResultMessage,
+          startTime,
+          totalCostUsd,
+          numTurns,
+          agentStats,
+          projectConfig,
+          usesDB,
+          successfulAgents,
+          visualTesterBrowserVerified,
+          agentMessages,
+          completedLoops,
+        );
         return;
       }
       if (!("type" in message)) continue;
@@ -1210,25 +1736,12 @@ async function runAgent(
           // When main agent speaks → complete previous sub-agents
           if (isMainAgent) {
             for (const taskId of [...activeTaskIds]) {
-              const agent = taskIdToAgent.get(taskId) || "unknown";
-              activeTaskIds.delete(taskId);
-              const startedAt = agentStartTimes.get(agent) || Date.now();
-              const dur = Date.now() - startedAt;
-              agentStartTimes.delete(agent);
-              if (!agentStats[agent]) agentStats[agent] = { inputTokens: 0, outputTokens: 0, durationMs: 0 };
-              agentStats[agent].durationMs = (agentStats[agent].durationMs || 0) + dur;
-              emit(projectId, { type: "subagent_completed", projectId, timestamp: Date.now(), data: { agent, taskId, success: true, durationMs: dur } });
-              if (projectConfig.gitEnabled) commitTask(projectConfig.workingDir, agent);
-              // Track completion count for feedback loop detection
-              agentCompletionCount.set(agent, (agentCompletionCount.get(agent) || 0) + 1);
-              // Complete active feedback loop if any
-              if (activeLoops.has(taskId)) {
-                const loop = activeLoops.get(taskId)!;
-                activeLoops.delete(taskId);
-                completedLoops.push({ qualityGate: loop.qualityGate, loopNumber: loop.loopNumber, resolved: true, reason: loop.reason });
-                emit(projectId, { type: "feedback_loop_completed", projectId, timestamp: Date.now(), data: { fromAgent: loop.fromAgent, toAgent: agent, success: true, loopNumber: loop.loopNumber, qualityGate: loop.qualityGate } });
-              }
+              finalizeSubagentTask(taskId, true);
             }
+          }
+
+          if (!isMainAgent && ast.parent_tool_use_id) {
+            taskLastActivityAt.set(ast.parent_tool_use_id, Date.now());
           }
 
           const content = ast.message?.content ?? [];
@@ -1239,6 +1752,10 @@ async function runAgent(
               if (!isMainAgent && ast.parent_tool_use_id) {
                 const a = taskIdToAgent.get(ast.parent_tool_use_id) || "unknown";
                 agentMessages.push({ agent: a, text: block.text.slice(0, 500) });
+                const evidence = taskEvidence.get(ast.parent_tool_use_id);
+                if (evidence && evidence.textSnippets.length < 8) {
+                  evidence.textSnippets.push(block.text.slice(0, 300));
+                }
               }
             }
 
@@ -1249,6 +1766,13 @@ async function runAgent(
 
               const file = block.input?.file_path || block.input?.pattern;
               const actingAgent = !isMainAgent && ast.parent_tool_use_id ? (taskIdToAgent.get(ast.parent_tool_use_id) || "unknown") : undefined;
+              if (!isMainAgent && ast.parent_tool_use_id) {
+                const evidence = taskEvidence.get(ast.parent_tool_use_id);
+                if (evidence) {
+                  evidence.usedTools.add(block.name);
+                  evidence.toolCounts[block.name] = (evidence.toolCounts[block.name] || 0) + 1;
+                }
+              }
 
               emit(projectId, { type: "task_progress", projectId, timestamp: Date.now(), data: { tool: block.name, file, detail: block.name === "Bash" ? block.input?.command?.slice(0, 80) : undefined, agent: actingAgent } });
 
@@ -1277,7 +1801,9 @@ async function runAgent(
 
                 activeTaskIds.add(block.id);
                 taskIdToAgent.set(block.id, agent);
-                agentStartTimes.set(agent, Date.now());
+                taskStartTimes.set(block.id, Date.now());
+                taskLastActivityAt.set(block.id, Date.now());
+                taskEvidence.set(block.id, { usedTools: new Set(), toolCounts: {}, textSnippets: [] });
 
                 emit(projectId, { type: "subagent_started", projectId, timestamp: Date.now(), data: { agent, taskId: block.id, description: (block.input?.description || "").slice(0, 100) } });
 
@@ -1301,20 +1827,7 @@ async function runAgent(
             }
 
             if (block.type === "tool_result" && activeTaskIds.has(block.tool_use_id)) {
-              const agent = taskIdToAgent.get(block.tool_use_id) || "unknown";
-              const taskSuccess = !block.is_error;
-              activeTaskIds.delete(block.tool_use_id);
-              emit(projectId, { type: "subagent_completed", projectId, timestamp: Date.now(), data: { agent, taskId: block.tool_use_id, success: taskSuccess } });
-              if (projectConfig.gitEnabled && taskSuccess) commitTask(projectConfig.workingDir, agent);
-              // Track completion count for feedback loop detection
-              agentCompletionCount.set(agent, (agentCompletionCount.get(agent) || 0) + 1);
-              // Complete active feedback loop if any
-              if (activeLoops.has(block.tool_use_id)) {
-                const loop = activeLoops.get(block.tool_use_id)!;
-                activeLoops.delete(block.tool_use_id);
-                completedLoops.push({ qualityGate: loop.qualityGate, loopNumber: loop.loopNumber, resolved: taskSuccess, reason: loop.reason });
-                emit(projectId, { type: "feedback_loop_completed", projectId, timestamp: Date.now(), data: { fromAgent: loop.fromAgent, toAgent: agent, success: taskSuccess, loopNumber: loop.loopNumber, qualityGate: loop.qualityGate } });
-              }
+              finalizeSubagentTask(block.tool_use_id, !block.is_error);
             }
           }
 
@@ -1343,33 +1856,76 @@ async function runAgent(
 
     }
 
+    if (runFailure) throw runFailure;
+    if (stoppingProjects.has(projectId)) return;
+
     // Loop ended without explicit result
     const fp = await (await import("./project-store.js")).getProject(projectId);
     if (fp && fp.status === "running") {
       const stats = buildAgentStats(agentStats);
-      emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success: true, result: "Project completed.", totalCostUsd, durationMs: Date.now() - startTime, numTurns, agentStats: stats } });
-      await updateProject(projectId, { status: "completed", totalCostUsd, durationMs: Date.now() - startTime, numTurns, agentStats: stats });
-      saveRunMemory(projectConfig.workingDir, { projectId, projectName: projectConfig.name, stack: projectConfig.techStack, startedAt: new Date(startTime).toISOString(), completedAt: new Date().toISOString(), success: true, totalCostUsd, durationMs: Date.now() - startTime, numTurns, agentStats: stats, decisions: [], feedbackLoops: completedLoops });
+      const runtimeGateFailures = validateProjectRuntimeGates(projectConfig.workingDir, usesDB, successfulAgents, visualTesterBrowserVerified);
+      const success = runtimeGateFailures.length === 0;
+      const resultText = success ? "Project completed." : `Runtime validation failed: ${runtimeGateFailures.join("; ")}`;
+      emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success, result: resultText, totalCostUsd, durationMs: Date.now() - startTime, numTurns, agentStats: stats } });
+      await updateProject(projectId, { status: success ? "completed" : "failed", totalCostUsd, durationMs: Date.now() - startTime, numTurns, result: resultText, agentStats: stats });
+      saveRunMemory(projectConfig.workingDir, { projectId, projectName: projectConfig.name, stack: projectConfig.techStack, startedAt: new Date(startTime).toISOString(), completedAt: new Date().toISOString(), success, totalCostUsd, durationMs: Date.now() - startTime, numTurns, agentStats: stats, decisions: [], feedbackLoops: completedLoops });
       // Extract lessons from this run
-      try { extractLessonsFromRun({ agentMessages, techStack: projectConfig.techStack, success: true }); } catch {}
+      try { extractLessonsFromRun({ agentMessages, techStack: projectConfig.techStack, success }); } catch {}
       // Extract lessons from feedback loops (quality gate failures)
       try { extractLessonsFromFeedbackLoops({ feedbackLoops: completedLoops, techStack: projectConfig.techStack }); } catch {}
+      if (runtimeGateFailures.length > 0) {
+        try { extractLessonsFromRuntimeFailures({ failures: runtimeGateFailures, techStack: projectConfig.techStack }); } catch {}
+      }
     }
 
   } catch (error) {
+    if (stoppingProjects.has(projectId)) return;
     const isEpipe = (error as NodeJS.ErrnoException)?.code === "EPIPE";
     console.error(`[orchestrator] ${projectId} error${isEpipe ? " (EPIPE)" : ""}:`, String(error).slice(0, 300));
     emit(projectId, { type: "project_error", projectId, timestamp: Date.now(), data: { error: isEpipe ? "Agent disconnected. Try again." : String(error) } });
     await updateProject(projectId, { status: "failed", durationMs: Date.now() - startTime, numTurns }).catch(() => {});
   } finally {
+    if (stallWatchdog) clearInterval(stallWatchdog);
     activeProjects.delete(projectId);
+    const cleanedListeners = cleanupWorkingDirListeners(projectConfig.workingDir);
+    if (cleanedListeners.length > 0) {
+      emit(projectId, {
+        type: "agent_message",
+        projectId,
+        timestamp: Date.now(),
+        data: { text: `Cleanup: closed local listeners ${cleanedListeners.join(", ")}`, isSubagent: false },
+      });
+    }
+    stoppingProjects.delete(projectId);
     console.log(`[orchestrator] ${projectId} finished`);
   }
 }
 
-async function handleCompletion(projectId: string, result: SDKResultMessage, startTime: number, totalCostUsd: number, numTurns: number, agentStats: Record<string, AgentRunStat>, projectConfig: ProjectConfig, agentMessages: Array<{ agent: string; text: string }> = [], completedLoops: Array<{ qualityGate: string; loopNumber: number; resolved: boolean; reason?: string }> = []) {
-  const success = !result.is_error;
-  const resultText = "result" in result ? result.result : undefined;
+async function handleCompletion(
+  projectId: string,
+  result: SDKResultMessage,
+  startTime: number,
+  totalCostUsd: number,
+  numTurns: number,
+  agentStats: Record<string, AgentRunStat>,
+  projectConfig: ProjectConfig,
+  usesDB: boolean,
+  successfulAgents: Set<string>,
+  visualTesterBrowserVerified: boolean,
+  agentMessages: Array<{ agent: string; text: string }> = [],
+  completedLoops: Array<{ qualityGate: string; loopNumber: number; resolved: boolean; reason?: string }> = [],
+) {
+  const rawSuccess = !result.is_error;
+  const runtimeGateFailures = rawSuccess
+    ? validateProjectRuntimeGates(projectConfig.workingDir, usesDB, successfulAgents, visualTesterBrowserVerified)
+    : [];
+  const success = rawSuccess && runtimeGateFailures.length === 0;
+  const baseResultText = "result" in result ? result.result : undefined;
+  const resultText = runtimeGateFailures.length > 0
+    ? `${baseResultText ? `${baseResultText}
+
+` : ""}Runtime validation failed: ${runtimeGateFailures.join("; ")}`
+    : baseResultText;
   const stats = buildAgentStats(agentStats);
   const dur = Date.now() - startTime;
   emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success, result: resultText, totalCostUsd, durationMs: dur, numTurns, agentStats: stats } });
@@ -1381,6 +1937,9 @@ async function handleCompletion(projectId: string, result: SDKResultMessage, sta
   try { extractLessonsFromRun({ agentMessages, techStack: projectConfig.techStack, success }); } catch {}
   // Extract lessons from feedback loops
   try { extractLessonsFromFeedbackLoops({ feedbackLoops: completedLoops, techStack: projectConfig.techStack }); } catch {}
+  if (runtimeGateFailures.length > 0) {
+    try { extractLessonsFromRuntimeFailures({ failures: runtimeGateFailures, techStack: projectConfig.techStack }); } catch {}
+  }
 }
 
 function buildAgentStats(agentStats: Record<string, AgentRunStat>): Record<string, AgentRunStat> {
@@ -1390,10 +1949,39 @@ function buildAgentStats(agentStats: Record<string, AgentRunStat>): Record<strin
 // ── Stop / Continue ───────────────────────────────────────────────────────────
 
 export async function stopProject(projectId: string): Promise<void> {
+  stoppingProjects.add(projectId);
+  const project = await getProject(projectId);
   const q = activeProjects.get(projectId);
   if (q) { q.close(); activeProjects.delete(projectId); }
-  await updateProject(projectId, { status: "stopped" });
-  emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success: false, result: "Stopped by user.", totalCostUsd: 0, durationMs: 0, numTurns: 0 } });
+  const cleanedListeners = project ? cleanupWorkingDirListeners(project.config.workingDir) : [];
+  await updateProject(projectId, {
+    status: "stopped",
+    result: "Stopped by user.",
+    totalCostUsd: project?.totalCostUsd,
+    durationMs: project?.durationMs,
+    numTurns: project?.numTurns,
+  });
+  emit(projectId, {
+    type: "project_completed",
+    projectId,
+    timestamp: Date.now(),
+    data: {
+      success: false,
+      result: "Stopped by user.",
+      totalCostUsd: project?.totalCostUsd || 0,
+      durationMs: project?.durationMs || 0,
+      numTurns: project?.numTurns || 0,
+      agentStats: project?.agentStats,
+    },
+  });
+  if (cleanedListeners.length > 0) {
+    emit(projectId, {
+      type: "agent_message",
+      projectId,
+      timestamp: Date.now(),
+      data: { text: `Cleanup: closed local listeners ${cleanedListeners.join(", ")}`, isSubagent: false },
+    });
+  }
 }
 
 export function getActiveProjectIds(): string[] { return [...activeProjects.keys()]; }
@@ -1402,7 +1990,6 @@ export async function continueProject(projectId: string, userMessage: string): P
   if (pendingContinue.has(projectId)) throw new Error("Continue already in progress for this project");
   pendingContinue.add(projectId);
   try {
-    const { getProject } = await import("./project-store.js");
     const project = await getProject(projectId);
     if (!project) throw new Error("Project not found");
     if (!project.sessionId) throw new Error("No session to resume");
@@ -1427,9 +2014,56 @@ async function runResumedAgent(
   mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }>,
   projectConfig: ProjectConfig, config: ReturnType<typeof loadConfig> & {},
 ): Promise<void> {
-  let totalCostUsd = 0; let totalInputTokens = 0; let totalOutputTokens = 0;
-  const startTime = Date.now(); let numTurns = 0;
+  let totalCostUsd = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  const startTime = Date.now();
+  let numTurns = 0;
+  const activeTaskIds = new Set<string>();
+  const taskIdToAgent = new Map<string, string>();
+  const taskStartTimes = new Map<string, number>();
+  const taskEvidence = new Map<string, TaskEvidence>();
+  const agentCompletionCount = new Map<string, number>();
+  const agentStats: Record<string, AgentRunStat> = {};
   const agentMessages: Array<{ agent: string; text: string }> = [];
+
+  const finalizeResumedSubagentTask = (taskId: string, taskSuccess: boolean): void => {
+    if (!activeTaskIds.has(taskId)) return;
+
+    const agent = taskIdToAgent.get(taskId) || "unknown";
+    const startedAt = taskStartTimes.get(taskId) || Date.now();
+    const dur = Date.now() - startedAt;
+    const evidence = taskEvidence.get(taskId);
+    const runtimeGateFailure = taskSuccess ? validateSubagentRuntimeGate(agent, projectConfig.workingDir, evidence) : null;
+    const finalSuccess = taskSuccess && !runtimeGateFailure;
+
+    activeTaskIds.delete(taskId);
+    taskIdToAgent.delete(taskId);
+    taskStartTimes.delete(taskId);
+    taskEvidence.delete(taskId);
+
+    if (!agentStats[agent]) agentStats[agent] = { inputTokens: 0, outputTokens: 0, durationMs: 0 };
+    agentStats[agent].durationMs = (agentStats[agent].durationMs || 0) + dur;
+    agentCompletionCount.set(agent, (agentCompletionCount.get(agent) || 0) + 1);
+
+    emit(projectId, {
+      type: "subagent_completed",
+      projectId,
+      timestamp: Date.now(),
+      data: { agent, taskId, success: finalSuccess, durationMs: dur },
+    });
+
+    if (runtimeGateFailure) {
+      try { extractLessonsFromRuntimeFailures({ failures: [runtimeGateFailure], techStack: projectConfig.techStack, agent }); } catch {}
+      emit(projectId, {
+        type: "agent_message",
+        projectId,
+        timestamp: Date.now(),
+        data: { text: `RUNTIME GATE FAIL (${agent}): ${runtimeGateFailure}`, isSubagent: false },
+      });
+      throw new Error(`Runtime gate failed for ${agent}: ${runtimeGateFailure}`);
+    }
+  };
 
   try {
     const mainModel = resolveModel(projectConfig, config);
@@ -1443,11 +2077,11 @@ async function runResumedAgent(
       options: {
         model: mainModel, resume: sessionId, cwd: projectConfig.workingDir,
         permissionMode: "acceptEdits",
-        allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite", "WebSearch", "WebFetch"],
+        allowedTools: ORCHESTRATOR_ALLOWED_TOOLS,
         maxTurns: config.maxTurns,
         ...(config.anthropicApiKey ? { maxBudgetUsd: config.maxBudgetUsd } : {}),
         mcpServers,
-        agents: buildAgentDefinitions(agentMdl, usesDB, !!projectConfig.pushToGithub),
+        agents: buildAgentDefinitions(projectConfig, agentMdl, usesDB, !!projectConfig.pushToGithub),
       },
     });
 
@@ -1456,200 +2090,413 @@ async function runResumedAgent(
 
     for await (const message of messages) {
       if ("type" in message && message.type === "result") {
+        for (const taskId of [...activeTaskIds]) {
+          finalizeResumedSubagentTask(taskId, true);
+        }
         const result = message as SDKResultMessage;
         const resultText = "result" in result ? result.result : undefined;
-        emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success: !result.is_error, result: resultText, totalCostUsd, durationMs: Date.now() - startTime, numTurns } });
-        await updateProject(projectId, { status: !result.is_error ? "completed" : "failed", totalCostUsd, durationMs: Date.now() - startTime, numTurns });
+        const stats = buildAgentStats(agentStats);
+        emit(projectId, {
+          type: "project_completed",
+          projectId,
+          timestamp: Date.now(),
+          data: { success: !result.is_error, result: resultText, totalCostUsd, durationMs: Date.now() - startTime, numTurns, agentStats: stats },
+        });
+        await updateProject(projectId, {
+          status: !result.is_error ? "completed" : "failed",
+          totalCostUsd,
+          durationMs: Date.now() - startTime,
+          numTurns,
+          result: resultText,
+          agentStats: stats,
+        });
         continue;
       }
+
       if ("type" in message && message.type === "assistant") {
         const ast = message as SDKAssistantMessage;
         numTurns++;
+        const isMainAgent = !ast.parent_tool_use_id;
+
+        if (isMainAgent) {
+          for (const taskId of [...activeTaskIds]) {
+            finalizeResumedSubagentTask(taskId, true);
+          }
+        }
+
         const content = ast.message?.content ?? [];
         for (const block of content) {
           if (block.type === "text" && block.text) {
-            emit(projectId, { type: "agent_message", projectId, timestamp: Date.now(), data: { text: block.text, isSubagent: false } });
-            // Collect agent messages for lesson extraction
-            agentMessages.push({ agent: "orchestrator", text: block.text.slice(0, 500) });
+            const speakingAgent = !isMainAgent && ast.parent_tool_use_id
+              ? (taskIdToAgent.get(ast.parent_tool_use_id) || "unknown")
+              : "orchestrator";
+            emit(projectId, {
+              type: "agent_message",
+              projectId,
+              timestamp: Date.now(),
+              data: { text: block.text, isSubagent: !isMainAgent },
+            });
+            agentMessages.push({ agent: speakingAgent, text: block.text.slice(0, 500) });
+            if (!isMainAgent && ast.parent_tool_use_id) {
+              const evidence = taskEvidence.get(ast.parent_tool_use_id);
+              if (evidence && evidence.textSnippets.length < 8) {
+                evidence.textSnippets.push(block.text.slice(0, 300));
+              }
+            }
           }
-          if (block.type === "tool_use") emit(projectId, { type: "task_progress", projectId, timestamp: Date.now(), data: { tool: block.name, file: block.input?.file_path || block.input?.pattern } });
+
+          if (block.type === "tool_use") {
+            const file = block.input?.file_path || block.input?.pattern;
+            const actingAgent = !isMainAgent && ast.parent_tool_use_id
+              ? (taskIdToAgent.get(ast.parent_tool_use_id) || "unknown")
+              : undefined;
+            if (!isMainAgent && ast.parent_tool_use_id) {
+              const evidence = taskEvidence.get(ast.parent_tool_use_id);
+              if (evidence) {
+                evidence.usedTools.add(block.name);
+                evidence.toolCounts[block.name] = (evidence.toolCounts[block.name] || 0) + 1;
+              }
+            }
+
+            emit(projectId, {
+              type: "task_progress",
+              projectId,
+              timestamp: Date.now(),
+              data: {
+                tool: block.name,
+                file,
+                detail: block.name === "Bash" ? block.input?.command?.slice(0, 80) : undefined,
+                agent: actingAgent,
+              },
+            });
+
+            if (isMainAgent && (block.name === "Task" || block.name === "Agent")) {
+              const validAgents = ["product_manager", "architect", "developer", "database", "security", "error_checker", "tester", "reviewer", "deployer", "visual_tester"];
+              let agent = "unknown";
+              const st = block.input?.subagent_type;
+
+              if (st && validAgents.includes(st)) {
+                agent = st;
+              } else {
+                const hint = (block.input?.description || block.input?.prompt || block.input?.task || "").toLowerCase();
+                if (hint.includes("product") || hint.includes("prd") || hint.includes("requirement") || hint.includes("user stor")) agent = "product_manager";
+                else if (hint.includes("architect") || hint.includes("design") || hint.includes("structure")) agent = "architect";
+                else if (hint.includes("database") || hint.includes("schema") || hint.includes("migration") || hint.includes("sql")) agent = "database";
+                else if (hint.includes("security") || hint.includes("owasp") || hint.includes("vuln") || hint.includes("secret")) agent = "security";
+                else if (hint.includes("develop") || hint.includes("implement") || hint.includes("code")) agent = "developer";
+                else if (hint.includes("error") || hint.includes("build") || hint.includes("compil") || hint.includes("lint") || hint.includes("type")) agent = "error_checker";
+                else if (hint.includes("test") || hint.includes("qa") || hint.includes("coverage")) agent = "tester";
+                else if (hint.includes("review") || hint.includes("quality") || hint.includes("refactor")) agent = "reviewer";
+                else if (hint.includes("deploy") || hint.includes("docker") || hint.includes("readme") || hint.includes("ci") || hint.includes("github")) agent = "deployer";
+                else if (hint.includes("visual") || hint.includes("browser") || hint.includes("playwright") || hint.includes("screenshot") || hint.includes("visual test")) agent = "visual_tester";
+              }
+
+              activeTaskIds.add(block.id);
+              taskIdToAgent.set(block.id, agent);
+              taskStartTimes.set(block.id, Date.now());
+              taskEvidence.set(block.id, { usedTools: new Set(), toolCounts: {}, textSnippets: [] });
+
+              emit(projectId, {
+                type: "subagent_started",
+                projectId,
+                timestamp: Date.now(),
+                data: { agent, taskId: block.id, description: (block.input?.description || "").slice(0, 100) },
+              });
+            }
+          }
+
+          if (block.type === "tool_result" && activeTaskIds.has(block.tool_use_id)) {
+            finalizeResumedSubagentTask(block.tool_use_id, !block.is_error);
+          }
         }
+
         const usage = ast.message?.usage;
         if (usage) {
           const cost = estimateCost(ast.message?.model || "claude-sonnet-4-6", usage);
-          totalCostUsd += cost; totalInputTokens += usage.input_tokens || 0; totalOutputTokens += usage.output_tokens || 0;
+          totalCostUsd += cost;
+          totalInputTokens += usage.input_tokens || 0;
+          totalOutputTokens += usage.output_tokens || 0;
+
+          if (!isMainAgent && ast.parent_tool_use_id) {
+            const agent = taskIdToAgent.get(ast.parent_tool_use_id);
+            if (agent) {
+              if (!agentStats[agent]) agentStats[agent] = { inputTokens: 0, outputTokens: 0, durationMs: 0 };
+              agentStats[agent].inputTokens += usage.input_tokens || 0;
+              agentStats[agent].outputTokens += usage.output_tokens || 0;
+            }
+          }
+
           emit(projectId, { type: "cost_update", projectId, timestamp: Date.now(), data: { totalCostUsd, inputTokens: totalInputTokens, outputTokens: totalOutputTokens } });
         }
       }
     }
 
-    const cur = await (await import("./project-store.js")).getProject(projectId);
+    for (const taskId of [...activeTaskIds]) {
+      finalizeResumedSubagentTask(taskId, true);
+    }
+    if (stoppingProjects.has(projectId)) return;
+
+    const cur = await getProject(projectId);
     if (cur && cur.status === "running") {
-      emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success: true, result: "Continued.", totalCostUsd, durationMs: Date.now() - startTime, numTurns } });
-      await updateProject(projectId, { status: "completed", totalCostUsd, durationMs: Date.now() - startTime, numTurns });
+      const stats = buildAgentStats(agentStats);
+      emit(projectId, {
+        type: "project_completed",
+        projectId,
+        timestamp: Date.now(),
+        data: { success: true, result: "Continued.", totalCostUsd, durationMs: Date.now() - startTime, numTurns, agentStats: stats },
+      });
+      await updateProject(projectId, { status: "completed", totalCostUsd, durationMs: Date.now() - startTime, numTurns, result: "Continued.", agentStats: stats });
     }
 
-    // Extract lessons from user feedback conversation
     try {
       extractLessonsFromFeedback({ userMessage: prompt, agentMessages, techStack: projectConfig.techStack });
     } catch {}
   } catch (error) {
+    if (stoppingProjects.has(projectId)) return;
     emit(projectId, { type: "project_error", projectId, timestamp: Date.now(), data: { error: String(error) } });
     await updateProject(projectId, { status: "failed" });
-    // Still try to extract lessons even on failure
     try {
       extractLessonsFromFeedback({ userMessage: prompt, agentMessages, techStack: projectConfig.techStack });
     } catch {}
-  } finally { activeProjects.delete(projectId); }
+  } finally {
+    activeProjects.delete(projectId);
+    const cleanedListeners = cleanupWorkingDirListeners(projectConfig.workingDir);
+    if (cleanedListeners.length > 0) {
+      emit(projectId, {
+        type: "agent_message",
+        projectId,
+        timestamp: Date.now(),
+        data: { text: `Cleanup: closed local listeners ${cleanedListeners.join(", ")}`, isSubagent: false },
+      });
+    }
+    stoppingProjects.delete(projectId);
+  }
 }
 
 // ── System Prompt ─────────────────────────────────────────────────────────────
 
+function formatPromptValue(value?: string): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : "Not provided";
+}
+
+function buildAgentTeamTable(usesDB: boolean, pushGH: boolean, mode: "new" | "existing"): string {
+  return `| Agent | subagent_type | Role |
+|-------|--------------|------|
+| Product Manager | \`product_manager\` | ${mode === "existing" ? "Repo audit + delta plan" : "PRD + requirements"} |
+| Architect | \`architect\` | ${mode === "existing" ? "Architecture delta + touched files" : "System design + file structure"} |
+| Developer | \`developer\` | Production code implementation |${usesDB ? `
+| Database | \`database\` | ${mode === "existing" ? "Schema review + safe migrations" : "Schema, migrations, optimization"} |` : ""}
+| Security | \`security\` | Security review + remediation |
+| Error Checker | \`error_checker\` | Build, lint, typecheck, runtime validation |
+| Tester | \`tester\` | Regression and automated tests |
+| Reviewer | \`reviewer\` | Final code review |
+| Deployer | \`deployer\` | Scripts, CI/CD, docs${pushGH ? ", GitHub push" : ""} |
+| Visual Tester | \`visual_tester\` | Browser QA with Playwright |`;
+}
+
+function buildProjectSection(projectConfig: ProjectConfig, mode: "new" | "existing"): string {
+  if (mode === "existing") {
+    return `## PROJECT
+- Mode: existing project continuation
+- Name: ${projectConfig.name}
+- Repo Path: ${projectConfig.workingDir}
+- Requested Change: ${projectConfig.businessNeed}
+- Constraints: ${projectConfig.technicalApproach}
+- Current State: ${formatPromptValue(projectConfig.currentState)}
+- Preferred Start Command: ${formatPromptValue(projectConfig.startCommand)}
+- Preferred Test Command: ${formatPromptValue(projectConfig.testCommand)}
+- Preferred Lint/Typecheck Command: ${formatPromptValue(projectConfig.lintCommand)}
+- Read-only Paths: ${formatPromptValue(projectConfig.readonlyPaths)}
+- Stack: ${projectConfig.techStack || "Detect from repository"}`;
+  }
+
+  return `## PROJECT
+- Name: ${projectConfig.name}
+- Need: ${projectConfig.businessNeed}
+- Constraints: ${projectConfig.technicalApproach}
+- Stack: ${projectConfig.techStack || "Architect decides"}`;
+}
+
+function buildForwardPassSection(projectConfig: ProjectConfig, usesDB: boolean, mode: "new" | "existing"): string {
+  if (mode === "existing") {
+    return `## PIPELINE
+Forward pass — every enabled agent must run at least once:
+1. product_manager: audit the repository and write PRD.md as a delta change plan with scope boundaries, touched modules, risks, and verification expectations.
+2. architect: read PRD.md and write ARCHITECTURE.md with the minimal architecture delta, preserved contracts, touched files, and commands to run.
+3. developer: implement the requested change with minimal safe diffs after reading PRD.md, ARCHITECTURE.md, and the relevant source tree.${usesDB ? `
+4. database: review the data layer and only introduce schema or seed changes if they are truly required; otherwise document that in DATABASE.md.` : ""}
+${usesDB ? "5" : "4"}. error_checker and security run in the same phase.
+${usesDB ? "6" : "5"}. tester.
+${usesDB ? "7" : "6"}. reviewer.
+${usesDB ? "8" : "7"}. deployer.
+${usesDB ? "9" : "8"}. visual_tester using the URL from deployer output.`;
+  }
+
+  return `## PIPELINE
+Forward pass — every enabled agent must run at least once:
+1. product_manager writes PRD.md.
+2. architect writes ARCHITECTURE.md.
+3. developer implements the system module by module.${usesDB ? `
+4. database handles schema, migrations, and data setup.` : ""}
+${usesDB ? "5" : "4"}. error_checker and security run in the same phase.
+${usesDB ? "6" : "5"}. tester.
+${usesDB ? "7" : "6"}. reviewer.
+${usesDB ? "8" : "7"}. deployer.
+${usesDB ? "9" : "8"}. visual_tester using the live URL from deployer.`;
+}
+
+function buildFeedbackLoopSection(mode: "new" | "existing"): string {
+  const developerFix = mode === "existing"
+    ? "Fix with minimal safe diffs, preserve conventions, and avoid unrelated rewrites."
+    : "Fix the source with targeted changes only."
+  const visualFix = mode === "existing"
+    ? "Fix only the changed flows and regressions without disturbing stable areas."
+    : "Fix the visual and functional issues found in browser QA."
+  return `## QUALITY GATES
+Every quality gate must end with exactly one of:
+- QUALITY GATE: PASS
+- QUALITY GATE: FAIL — [issues]
+
+On FAIL, you must announce a feedback loop and route work as follows:
+- error_checker -> developer -> re-run error_checker
+- security -> developer -> re-run security
+- tester -> developer -> re-run tester
+- reviewer -> developer (do not re-run reviewer unless explicitly needed)
+- deployer startup failure -> error_checker, then developer if code changes are required, then re-verify deployer
+- visual_tester -> developer -> re-run visual_tester
+
+Use this announcement format exactly:
+"FEEDBACK LOOP [N]: Routing from [quality_gate] back to [target_agent] because: [reason]"
+Then later:
+"FEEDBACK LOOP [N] COMPLETE: [resolved/partially resolved/unresolved]"
+
+Developer instructions inside loops:
+- Standard loop: ${developerFix}
+- Visual loop: ${visualFix}`;
+}
+
+function buildHardRulesSection(totalAgents: number, stackGuardrails: string, mode: "new" | "existing"): string {
+  return `## HARD RULES
+1. You are a coordinator only. Never write code yourself; delegate via Task.
+2. All ${totalAgents} agents in the forward pass must run at least once.
+3. Feedback loops are additional passes; they never replace the forward pass.
+4. Pass full execution context in every Task prompt: requested change, constraints, affected files, preferred commands, and read-only paths when present.
+5. Use TodoWrite to track progress and retries.
+6. Work autonomously; do not ask questions.
+7. Retry budget: error_checker/tester/reviewer/visual_tester = 3, security/deployer = 2.
+8. Artifact gates are mandatory: PRD.md after product_manager, ARCHITECTURE.md after architect, VISUAL_TEST_REPORT.md after visual_tester.
+9. visual_tester is a blocking gate. Do not complete the project unless it used real browser MCP tools and verified the changed flows.${mode === "existing" ? "\n10. Existing repo mode is DELTA-ONLY: audit before editing, preserve conventions, and do not rewrite unrelated systems." : ""}${stackGuardrails}`;
+}
+
+function buildUiUxSection(mode: "new" | "existing"): string {
+  return `## UI/UX
+Today's date: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+- Aim for high-polish, premium interfaces with strong hierarchy, responsive behavior, and meaningful animation.
+- Extend the repo's design system if one already exists${mode === "existing" ? "; do not replace it wholesale" : "."}
+- Default to light map tiles unless the user explicitly requests dark.
+- Respect reduced motion and existing theming support.
+- Empty, loading, and error states must all look intentional.
+- Interactive surfaces should feel alive: charts explorable, tables sortable, maps clickable, filters instant.`;
+}
+
+function buildDependencySection(mode: "new" | "existing"): string {
+  return `## DEPENDENCIES
+- Verify the latest stable package version with WebSearch or WebFetch before installing.
+- Prefer the repository's current dependency strategy${mode === "existing" ? " unless a verified upgrade is required." : "."}
+- For JS, prefer npm install package@latest and then lock after validation.
+- For Python geospatial packages, prefer >= ranges instead of invented exact pins.
+- For requirements files, verify versions exist before pinning.`;
+}
+
+function buildFinalSummarySection(projectConfig: ProjectConfig, mode: "new" | "existing"): string {
+  return `## FINAL SUMMARY
+Return a 3-5 line plain-text summary with no markdown. Include:
+- what changed,
+- what was verified,
+- where reports were written,
+- anything still manual.
+Use language like: "Done. ${mode === "existing" ? `Updated ${projectConfig.workingDir}` : `Built ${projectConfig.name}`} and verified it locally. Reports are consolidated in ORCHESTRA_REPORT.md. Temporary local listeners were closed."`;
+}
+
 function buildSystemPrompt(projectConfig: ProjectConfig, template: string): string {
+  const mode = getProjectMode(projectConfig);
   const usesDB = projectUsesDatabase(projectConfig);
   const pushGH = projectConfig.pushToGithub;
   const totalAgents = usesDB ? 10 : 9;
+  const rc = loadOrchestraRC(projectConfig.workingDir);
+  const stackGuardrails = formatStackGuardrails(projectConfig, rc);
+  const roleLine = mode === "existing"
+    ? "You are the lead orchestrator for an existing software project."
+    : "You are the lead orchestrator for a software project.";
 
   return `${template}
 
-You are the lead orchestrator for a software project. You are a COORDINATOR ONLY — never write code yourself. Delegate ALL work via Task tool.
+${roleLine} You are a COORDINATOR ONLY — never write code yourself. Delegate all implementation via Task.
 
-## YOUR TEAM (${totalAgents} agents — ALL required)
+## TEAM (${totalAgents} agents — all required)
+${buildAgentTeamTable(usesDB, !!pushGH, mode)}
 
-| Agent | subagent_type | Role |
-|-------|--------------|------|
-| Product Manager | \`product_manager\` | PRD, user stories, requirements |
-| Architect | \`architect\` | System design, file structure, decisions |
-| Developer | \`developer\` | ALL production code |${usesDB ? `
-| Database | \`database\` | Schema, migrations, optimization |` : ""}
-| Security | \`security\` | OWASP scan, hardening, vulnerability fixes |
-| Error Checker | \`error_checker\` | Build, type-check, lint, fix errors |
-| Tester | \`tester\` | Unit, integration, E2E tests |
-| Reviewer | \`reviewer\` | Code quality, performance, maintainability |
-| Deployer | \`deployer\` | Docker, CI/CD, README${pushGH ? ", GitHub push" : ""} |
-| Visual Tester | \`visual_tester\` | Browser testing via Playwright — opens Chrome, navigates app, checks console |
+${buildProjectSection(projectConfig, mode)}
 
-## PROJECT
-- Name: ${projectConfig.name}
-- Need: ${projectConfig.businessNeed}
-- Approach: ${projectConfig.technicalApproach}
-- Stack: ${projectConfig.techStack || "Architect decides"}
+${buildForwardPassSection(projectConfig, usesDB, mode)}
 
-## PIPELINE WITH FEEDBACK LOOPS (Star Topology)
+${buildFeedbackLoopSection(mode)}
 
-### Forward Pass (execute in order — ALL agents must run at least once):
-Phase 0 → Task(subagent_type="product_manager", ...)
-Phase 1 → Task(subagent_type="architect", ...)
-Phase 2 → Task(subagent_type="developer", ...) [one call per module]${usesDB ? `
-Phase 3 → Task(subagent_type="database", ...)` : ""}
-Phase ${usesDB ? 4 : 3} → Task(subagent_type="error_checker", ...) AND Task(subagent_type="security", ...) [same response]
-Phase ${usesDB ? 5 : 4} → Task(subagent_type="tester", ...)
-Phase ${usesDB ? 6 : 5} → Task(subagent_type="reviewer", ...)
-Phase ${usesDB ? 7 : 6} → Task(subagent_type="deployer", ...)
-Phase ${usesDB ? 8 : 7} → Task(subagent_type="visual_tester", prompt="Open the running app in a browser. URL: [paste from deployer output]. Test all pages, check console for errors, click interactive elements, verify data renders. Read ARCHITECTURE.md for routes.")
-
-### Feedback Loops (MANDATORY — check QUALITY GATE signal after each quality gate):
-
-Each quality gate agent ends its response with "QUALITY GATE: PASS" or "QUALITY GATE: FAIL — [issues]".
-YOU MUST CHECK THIS SIGNAL and act accordingly.
-
-AFTER Error Checker completes → Check its QUALITY GATE signal:
-- "QUALITY GATE: FAIL — [issues]":
-  → Announce: "FEEDBACK LOOP 1: Routing from error_checker back to developer because: [issues]"
-  → Task(subagent_type="developer", prompt="FEEDBACK LOOP: error_checker found issues. ISSUES: [paste]. Fix these in source files. Targeted fixes only.")
-  → Re-run Task(subagent_type="error_checker", ...) to verify. Max 3 retry loops.
-- "QUALITY GATE: PASS": proceed to Security check.
-
-AFTER Security completes → Check its QUALITY GATE signal:
-- "QUALITY GATE: FAIL — [vulnerabilities]":
-  → Announce: "FEEDBACK LOOP 1: Routing from security back to developer because: [vulnerabilities]"
-  → Task(subagent_type="developer", prompt="FEEDBACK LOOP: security found critical vulnerabilities. ISSUES: [paste]. Fix these security issues in source files.")
-  → Re-run Task(subagent_type="security", ...) to verify. Max 2 retry loops.
-- "QUALITY GATE: PASS": proceed immediately to Tester.
-
-AFTER Tester completes → Check its QUALITY GATE signal:
-- "QUALITY GATE: FAIL — [failing tests]":
-  → Announce: "FEEDBACK LOOP 1: Routing from tester back to developer because: [failing tests]"
-  → Task(subagent_type="developer", prompt="FEEDBACK LOOP: tester found failures. FAILURES: [paste]. Fix the code or tests.")
-  → Re-run Task(subagent_type="tester", ...) to verify. Max 3 retry loops.
-- "QUALITY GATE: PASS": proceed immediately to Reviewer.
-
-AFTER Reviewer completes → Check its QUALITY GATE signal:
-- "QUALITY GATE: FAIL — [critical issues]":
-  → Announce: "FEEDBACK LOOP 1: Routing from reviewer back to developer because: [critical issues]"
-  → Task(subagent_type="developer", prompt="FEEDBACK LOOP: reviewer found critical issues. ISSUES: [paste]. Fix only the critical ones.")
-  → Do NOT re-run reviewer. Max 3 retries.
-- "QUALITY GATE: PASS": proceed immediately to Deployer.
-
-AFTER Deployer completes → Check its QUALITY GATE signal:
-- "QUALITY GATE: FAIL — [startup error]":
-  → Announce: "FEEDBACK LOOP 1: Routing from deployer back to error_checker because: app fails to start"
-  → Task(subagent_type="error_checker", prompt="FEEDBACK LOOP: deployer found app doesn't start. Diagnose and fix.")
-  → Then Task(subagent_type="developer", ...) if error_checker finds code issues
-  → Re-verify: start app, curl main URL. Max 2 retry loops.
-- "QUALITY GATE: PASS": proceed immediately to Visual Tester.
-
-AFTER Visual Tester completes → Check its QUALITY GATE signal:
-- "QUALITY GATE: FAIL — [visual issues]":
-  → Announce: "FEEDBACK LOOP 1: Routing from visual_tester back to developer because: [visual issues]"
-  → Task(subagent_type="developer", prompt="FEEDBACK LOOP: visual_tester found issues when testing the app in a real browser. ISSUES: [paste]. Fix these visual/functional issues.")
-  → Re-run Task(subagent_type="visual_tester", ...) to verify. Max 3 retry loops.
-- "QUALITY GATE: PASS": project complete.
-
-### Loop Announcement Format (follow exactly):
-"FEEDBACK LOOP [N]: Routing from [quality_gate] back to [target_agent] because: [reason]"
-After loop: "FEEDBACK LOOP [N] COMPLETE: [resolved/partially resolved/unresolved]"
-
-## HARD RULES
-1. NEVER write code yourself — delegate via Task
-2. ALL ${totalAgents} agents must run at least once in the forward pass
-3. Feedback loops are ADDITIONAL runs — they don't replace the forward pass
-4. Pass full context in every agent's prompt (what previous agents produced)
-5. Use TodoWrite to track progress including retry loops
-6. Work autonomously — never ask questions
-7. Max retries: 3 for error_checker/tester/reviewer/visual_tester gates, 2 for security/deployer gates
-8. End result must be WORKING, RUNNABLE code — use feedback loops to achieve this
+${buildHardRulesSection(totalAgents, stackGuardrails, mode)}
 
 ## VALID subagent_type VALUES
 "product_manager", "architect", "developer"${usesDB ? ', "database"' : ''}, "security", "error_checker", "tester", "reviewer", "deployer", "visual_tester"
 
-## UI/UX — Make it EXCEPTIONAL (for all user-facing apps)
-Today's date: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+${buildUiUxSection(mode)}
 
-Design principle: **WOW factor first**. Every app must feel polished, interactive, and modern as of today.
-Use the absolute latest design trends available at this date:
-- Bento grid layouts, fluid typography, variable fonts, layered depth
-- Glass morphism + soft shadows — but on LIGHT backgrounds (white/cream/slate-50), not dark
-- Smooth micro-animations everywhere: page transitions, hover states, spring physics, scroll-triggered effects
-- Skeleton loaders, optimistic UI, instant feedback on every interaction
-- **Always install the latest stable version** of each package — check npm before pinning. As of today that includes React, Tailwind CSS v4+, shadcn/ui, framer-motion / motion.dev — but use whatever is newest at build time.
-- **Maps: ALWAYS light/white tiles** (CartoDB Positron: \`https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png\`) — never dark unless user asks
-- Respect prefers-color-scheme — include a dark/light toggle
-- Mobile-first, responsive at every breakpoint
-- Empty states, error states, and loading states must all look good — not blank
-- **Interactive by default**: charts are clickable, maps are explorable, tables are sortable, filters are instant
+${buildDependencySection(mode)}
 
-## DEPENDENCY VERSIONS
-- **Before installing anything**: run WebSearch or WebFetch to verify the latest stable version on npm/PyPI — never guess or hardcode old version numbers
-- Use \`npm install package@latest\` for JS or \`pip install package\` (no pin) when you want the newest, then lock it after verifying it works
-- For Python geospatial packages use \`>=\` ranges (e.g. \`osmnx>=1.9\`, \`geopandas>=0.14\`) not exact pins
-- Python syntax: use 3.10+ compatible code (\`X | Y\` unions, \`match\` statements are fine)
-- For requirements.txt: verify all versions exist before pinning — prefer flexible ranges over strict pins
-
-## FINAL SUMMARY — IMPORTANT
-When ALL agents are done, write a SHORT plain-text summary (NOT markdown). No tables, no bold, no headers. Just clear conversational text like:
-
-"Done! Your project is running at http://localhost:XXXX.
-Created XX files, XXX tests passing, XX% coverage. Quality: X.X/10.
-Pending: [anything the user needs to do manually, e.g. run data pipeline]"
-
-Keep it to 3-5 lines max. The user sees this in a terminal-like panel, so markdown renders as ugly raw text.
-${formatLessonsForPrompt(projectConfig.techStack)}
-You coordinate. They execute. ALL ${totalAgents} agents must run. Start with Phase 0 (product_manager) NOW.`;
+${buildFinalSummarySection(projectConfig, mode)}${formatLessonsForPrompt(projectConfig.techStack)}
+You coordinate. They execute. Start with Phase 0 now.`;
 }
 
 function buildPrompt(projectConfig: ProjectConfig): string {
+  const mode = getProjectMode(projectConfig);
   const usesDB = projectUsesDatabase(projectConfig);
+  const rc = loadOrchestraRC(projectConfig.workingDir);
+  const stackGuardrails = formatStackGuardrails(projectConfig, rc);
+
+  if (mode === "existing") {
+    return `Continue this existing project by delegating to your specialized subagents.
+
+Mode: existing project
+Project: ${projectConfig.name}
+Repository Path: ${projectConfig.workingDir}
+Requested Change: ${projectConfig.businessNeed}
+Constraints: ${projectConfig.technicalApproach}
+Current State: ${formatPromptValue(projectConfig.currentState)}
+Preferred Start Command: ${formatPromptValue(projectConfig.startCommand)}
+Preferred Test Command: ${formatPromptValue(projectConfig.testCommand)}
+Preferred Lint/Typecheck Command: ${formatPromptValue(projectConfig.lintCommand)}
+Read-only Paths: ${formatPromptValue(projectConfig.readonlyPaths)}
+Stack: ${projectConfig.techStack || "Detect from repository"}
+
+START NOW — execute the full existing-project pipeline:
+0. Task(subagent_type="product_manager", description="Audit repo and write delta change plan", prompt="Inspect the repository before planning. Read manifests, entrypoints, nearby modules, tests, routes, infra, and any files relevant to this request. Write PRD.md as a DELTA change plan for: ${projectConfig.businessNeed}. Include current-state summary, affected modules, acceptance criteria, explicit in-scope/out-of-scope boundaries, regression risks, and rollout notes. Do not propose a rewrite.")
+1. Task(subagent_type="architect", description="Design the minimal architecture delta", prompt="Read PRD.md and inspect the existing repo. Produce ARCHITECTURE.md focused on the architecture delta for: ${projectConfig.businessNeed}. Preserve existing patterns, list only touched/new files, note contracts to preserve, commands to run, and deployment or migration implications.")
+2. Task(subagent_type="developer", description="Implement the requested change with surgical edits", prompt="Read PRD.md and ARCHITECTURE.md, inspect the current source tree, and implement the requested change with minimal correct diffs. Preserve repo conventions. Requested change: ${projectConfig.businessNeed}. Constraints: ${projectConfig.technicalApproach}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.") [repeat per affected module]${usesDB ? `
+3. Task(subagent_type="database", description="Review database impact for the existing repo", prompt="Read PRD.md and ARCHITECTURE.md, inspect the current data layer, and only introduce schema or migration changes if they are truly required. If no DB change is needed, write DATABASE.md stating that clearly and explain why.")` : ""}
+${usesDB ? "4" : "3"}. SAME RESPONSE: Task(subagent_type="error_checker", description="Validate build, lint, and runtime for the existing repo", prompt="Use the repository's real scripts first. Preferred lint/typecheck command: ${formatPromptValue(projectConfig.lintCommand)}. Preferred test command: ${formatPromptValue(projectConfig.testCommand)}. Preferred start command: ${formatPromptValue(projectConfig.startCommand)}. Fix issues with minimal diffs and verify the app still starts.") + Task(subagent_type="security", description="Audit changed areas and adjacent attack surface", prompt="Review the changed files plus nearby auth, data, input-validation, and dependency surfaces. Fix critical/high issues directly, but avoid unrelated rewrites.")
+${usesDB ? "5" : "4"}. Task(subagent_type="tester", description="Write and run regression tests for the changed behavior", prompt="Use the repository's preferred test command when available: ${formatPromptValue(projectConfig.testCommand)}. Focus on regression coverage for the requested change, touched modules, and critical adjacent flows. Add tests to the existing framework instead of inventing a parallel test setup.")
+${usesDB ? "6" : "5"}. Task(subagent_type="reviewer", description="Review changed files and impacted integration points", prompt="Review the implementation for regressions, contract mismatches, performance issues, maintainability problems, and missing tests. Focus on what changed and what it can break in the existing system.")
+${usesDB ? "7" : "6"}. Task(subagent_type="deployer", description="Use existing scripts and verify the updated app", prompt="Use the repo's actual scripts, README patterns, and CI setup as the baseline. Preferred start command: ${formatPromptValue(projectConfig.startCommand)}. Consolidate report markdown files into ORCHESTRA_REPORT.md, verify the app runs, and report the exact URL used for verification. The orchestrator will clean up temporary local listeners after the full pipeline finishes.")
+${usesDB ? "8" : "7"}. Task(subagent_type="visual_tester", description="Open the updated app in Chrome and test changed flows", prompt="Open the running app in Chrome. Test the changed routes and critical smoke flows from ARCHITECTURE.md. Check console errors, network failures, broken interactions, and visual regressions.")
+
+After each quality gate (Error Checker, Tester, Reviewer, Deployer, Visual Tester), READ their output.
+If they found unresolved issues → route back to Developer to fix → re-verify.
+Max 3 retries per gate. The goal is WORKING code with minimal safe diffs, not just "all agents ran."
+Announce each loop: "FEEDBACK LOOP [N]: Routing from [agent] back to [agent] because: [reason]"
+Visual Tester is mandatory and must use real browser MCP tools. If browser tools or the live URL are unavailable, that gate must fail.${stackGuardrails}
+Do not advance phases unless the expected artifacts exist on disk: PRD.md after product_manager, ARCHITECTURE.md after architect, VISUAL_TEST_REPORT.md after visual_tester.
+
+Do NOT write any code yourself. For every delegation, pass along the requested change, current state, preferred commands, and read-only paths. Start with Phase 0 now.`;
+  }
 
   return `Build this project end-to-end by delegating to your specialized subagents.
 
@@ -1673,6 +2520,8 @@ After each quality gate (Error Checker, Tester, Reviewer, Deployer, Visual Teste
 If they found unresolved issues → route back to Developer to fix → re-verify.
 Max 3 retries per gate. The goal is WORKING code, not just "all agents ran."
 Announce each loop: "FEEDBACK LOOP [N]: Routing from [agent] back to [agent] because: [reason]"
+Visual Tester is mandatory and must use real browser MCP tools. If browser tools or the live URL are unavailable, that gate must fail.${stackGuardrails}
+Do not advance phases unless the expected artifacts exist on disk: PRD.md after product_manager, ARCHITECTURE.md after architect, VISUAL_TEST_REPORT.md after visual_tester.
 
 Do NOT write any code yourself. Start with Phase 0 now.`;
 }

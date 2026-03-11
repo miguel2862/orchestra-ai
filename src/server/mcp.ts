@@ -46,8 +46,29 @@ const DEFAULT_MCP_SERVERS: McpServerEntry[] = [
   },
 ];
 
+const REQUIRED_SERVER_NAMES = new Set(["playwright"]);
+
 export function getDefaultMcpServers(): McpServerEntry[] {
   return DEFAULT_MCP_SERVERS.map((s) => ({ ...s }));
+}
+
+function withRequiredServers(servers: McpServerEntry[]): McpServerEntry[] {
+  const merged = servers.map((s) => ({ ...s }));
+
+  for (const name of REQUIRED_SERVER_NAMES) {
+    const existing = merged.find((server) => server.name === name);
+    if (existing) {
+      existing.enabled = true;
+      continue;
+    }
+
+    const fallback = DEFAULT_MCP_SERVERS.find((server) => server.name === name);
+    if (fallback) {
+      merged.push({ ...fallback, enabled: true });
+    }
+  }
+
+  return merged;
 }
 
 export async function precacheMcpServers(): Promise<void> {
@@ -69,7 +90,7 @@ export function buildMcpServerConfig(
 ): Record<string, { command: string; args: string[]; env?: Record<string, string> }> {
   const config: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
 
-  for (const server of servers) {
+  for (const server of withRequiredServers(servers)) {
     if (!server.enabled) continue;
 
     const args = [...server.args];

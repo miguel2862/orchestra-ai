@@ -5,6 +5,7 @@ const BASE = "/api";
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
+    signal: opts?.signal ?? AbortSignal.timeout(8000),
     ...opts,
   });
   if (!res.ok) {

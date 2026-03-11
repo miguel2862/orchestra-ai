@@ -80,12 +80,18 @@ export interface McpServerEntry {
 
 // ── Projects ──
 export interface ProjectConfig {
+  mode?: "new" | "existing";
   name: string;
   businessNeed: string;
   technicalApproach: string;
   techStack: string;
   template: string;
   workingDir: string;
+  currentState?: string;
+  startCommand?: string;
+  testCommand?: string;
+  lintCommand?: string;
+  readonlyPaths?: string;
   gitEnabled: boolean;
   pushToGithub?: boolean;        // optional GitHub push at end
   /** Per-project model override. If "auto", Orchestra picks the best model. Empty = use global config. */

@@ -14,6 +14,9 @@ export function useProjects() {
   return useQuery({
     queryKey: ["projects"],
     queryFn: () => api.listProjects(),
+    refetchInterval: 5000,
+    refetchOnMount: "always",
+    refetchIntervalInBackground: true,
   });
 }
 

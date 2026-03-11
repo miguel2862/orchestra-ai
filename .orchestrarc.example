@@ -1,0 +1,30 @@
+{
+  "pipeline": {
+    "subagentStallTimeoutMs": 900000
+  },
+  "stack": {
+    "enabledGuards": [
+      "react_rendering",
+      "motion_accessibility",
+      "api_contracts"
+    ],
+    "disabledGuards": [],
+    "guardrails": [
+      "Do not edit files under legacy/ without an explicit reason in the task prompt.",
+      "Prefer shared utilities over duplicating map normalization logic across features."
+    ],
+    "conventions": {
+      "state": "Reuse the existing store and hooks before introducing a new state layer.",
+      "ui": "Extend the established component patterns and token system before introducing new primitives.",
+      "testing": "Add regression tests next to the affected module using the repo's current test runner."
+    }
+  },
+  "agents": {
+    "architect": {
+      "stallTimeoutMs": 1200000
+    },
+    "developer": {
+      "stallTimeoutMs": 1200000
+    }
+  }
+}

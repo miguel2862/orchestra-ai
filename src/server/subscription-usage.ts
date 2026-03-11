@@ -276,7 +276,7 @@ async function fetchFromApi(token: string): Promise<SubscriptionUsage> {
       "Content-Type": "application/json",
       "User-Agent": "orchestra-ai-app/0.1.0",
     },
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(5000),
   });
 
   if (res.status === 429) {
@@ -313,6 +313,7 @@ export function forceRefreshSubscription(): void {
 export async function getSubscriptionUsage(): Promise<SubscriptionUsage> {
   const now = Date.now();
   const age = now - cachedAt;
+  const codexBarSnapshot = readCodexBarSnapshot();
 
   // Fresh cache — return immediately
   if (cachedResult?.available && age < CACHE_TTL_MS) {
@@ -327,6 +328,18 @@ export async function getSubscriptionUsage(): Promise<SubscriptionUsage> {
       });
     }
     return cachedResult;
+  }
+
+  // Fast local fallback — render immediately from CodexBar while the API refreshes
+  if (codexBarSnapshot?.available) {
+    cachedResult = codexBarSnapshot;
+    cachedAt = now;
+    if (!pendingFetch) {
+      pendingFetch = refreshUsage().finally(() => {
+        pendingFetch = null;
+      });
+    }
+    return codexBarSnapshot;
   }
 
   // No cache or expired — wait for fresh data

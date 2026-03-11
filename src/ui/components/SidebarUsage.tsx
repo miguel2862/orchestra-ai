@@ -9,13 +9,15 @@ export default function SidebarUsage() {
   const { data: stats } = useQuery<ClaudeUsageStats>({
     queryKey: ["usage"],
     queryFn: () => api.getUsageStats(),
-    refetchInterval: 60_000,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: true,
   });
 
   const { data: sub } = useQuery<SubscriptionUsage>({
     queryKey: ["subscription"],
     queryFn: () => api.getSubscriptionUsage(),
     refetchInterval: 120_000,
+    refetchIntervalInBackground: true,
   });
 
   if (!stats?.available && !sub?.available) return null;
