@@ -242,10 +242,20 @@ Get yours at [console.anthropic.com](https://console.anthropic.com) and paste it
 
 ## 💰 Cost
 
+### With a Claude subscription
+
+**No extra token cost.** Orchestra uses your plan's built-in quota — no separate billing. The **Claude Usage** panel in the dashboard shows both limits live so you always know how much headroom you have before starting a project.
+
 ![Claude usage panel — session and weekly limits live](assets/screenshots/usage.jpeg)
 
-### With a Claude subscription
-**No extra token cost.** Usage counts against your plan's session and weekly limits. The dashboard shows both live.
+Claude subscriptions have two independent rolling windows:
+
+| Limit | Window | How it works |
+|-------|--------|------------------|
+| **Session** | 5-hour rolling | Resets every 5 hours. The countdown ("Resets in 2h 23m") tells you exactly when you can run again at full speed. |
+| **Weekly** | 7-day rolling | Cumulative usage over the last 7 days. Renews the same day and time each week. |
+
+> **Planning a big project?** Glance at the weekly bar first. Above ~80%? Either wait for the session reset (usually a few hours) or switch to API key mode for that run — you won't lose any progress either way.
 
 ### With an API key
 
