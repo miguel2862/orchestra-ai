@@ -79,8 +79,8 @@ export async function runSetup(): Promise<void> {
   const theme = await select({
     message: "UI theme:",
     choices: [
-      { name: "System (auto)", value: "system" as const },
       { name: "Dark", value: "dark" as const },
+      { name: "System (auto)", value: "system" as const },
       { name: "Light", value: "light" as const },
     ],
   });
