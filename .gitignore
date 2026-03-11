@@ -1,0 +1,40 @@
+# Build output
+dist/
+dist-ui/
+
+# Dependencies
+node_modules/
+
+# Lock files (keep package-lock.json for reproducibility; ignore if you prefer yarn/pnpm)
+# package-lock.json
+
+# Environment / secrets — NEVER commit these
+.env
+.env.local
+.env.production
+*.credentials.json
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
+# Temp files
+*.tmp
+*.temp
