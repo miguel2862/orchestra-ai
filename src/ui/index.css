@@ -154,6 +154,17 @@
   color: var(--text-muted);
 }
 
+/* Select dropdown options — browsers render these natively so we need solid colors */
+select.input option {
+  background: #1a1a2e;
+  color: #e5e7eb;
+}
+
+[data-theme="light"] select.input option {
+  background: #ffffff;
+  color: #111827;
+}
+
 .input:focus {
   border-color: rgba(139,92,246,0.5);
   box-shadow: var(--glow-violet);
