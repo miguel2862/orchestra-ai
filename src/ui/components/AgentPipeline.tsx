@@ -56,9 +56,9 @@ const POSITIONS: Record<string, { x: number; y: number }> = {
   error_checker:   { x: 464, y: 220 }, // 3 o'clock
   security:        { x: 428, y: 352 }, // 5 o'clock
   tester:          { x: 280, y: 390 }, // 6 o'clock
-  reviewer:        { x: 148, y: 390 }, // 7 o'clock
-  visual_tester:   { x: 60,  y: 310 }, // 8 o'clock
-  deployer:        { x: 94,  y: 188 }, // 9 o'clock
+  reviewer:        { x: 120, y: 358 }, // 7 o'clock
+  deployer:        { x: 70,  y: 268 }, // 8 o'clock
+  visual_tester:   { x: 70,  y: 174 }, // 10 o'clock (above deployer)
 };
 
 // Card sizes (slightly smaller for tighter fit)
