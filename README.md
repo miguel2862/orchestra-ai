@@ -61,50 +61,84 @@ On first launch, a setup wizard runs automatically — it takes about 30 seconds
 | **Node.js** | v18 or higher — [download](https://nodejs.org) |
 | **Claude auth** | One of the two options below |
 
-**Option A — Claude Max subscription** *(recommended, no API costs)*
+**Option A — Claude Max subscription** *(recommended — no per-token API costs)*
 ```bash
 npm install -g @anthropic-ai/claude-code
 claude login
 ```
 
-**Option B — Anthropic API key**
+**Option B — Anthropic API key** *(pay per token)*
 Get yours at [console.anthropic.com](https://console.anthropic.com) and paste it during setup.
 
 ---
 
-## 🤖 The 9-Agent Pipeline
+## 🤖 Star Topology Pipeline (non-linear)
 
-Orchestra runs agents in a hub-and-spoke architecture. The **Developer** is at the center; quality agents orbit around it with automatic feedback loops.
+Orchestra uses a **star / hub-and-spoke architecture**, not a simple linear chain. The **Developer** agent sits at the center — it receives inputs from the orchestrator and routes feedback from all quality agents. This allows failed quality checks to loop back automatically without restarting the whole pipeline.
 
 ```
 Phase 0:  🧠 Product Manager  →  Requirements & PRD
 Phase 1:  🏛  Architect        →  System design & tech stack
-Phase 2:  💻  Developer        →  Full implementation (hub)
-Phase 2b: 🗄  Database         →  Schema & queries (DB projects)
-          ↕ (feedback loops if issues found)
-Phase 3:  🔍  Error Checker    →  Bugs & type errors
-          🔒  Security         →  Vulnerability audit
-          🧪  Tester           →  Automated tests
-          👁  Reviewer         →  Code quality
+                                          │
+Phase 2:  💻  Developer  ◄────────────── ┤  ← hub (all quality agents connect here)
+          🗄  Database (optional)         │
+                    │                     │
+        ┌───────────┼───────────┐         │
+Phase 3: 🔍 Error   🔒 Security  🧪 Tester  👁 Reviewer
+        └───────────┼───────────┘
+                    │  (feedback loops if issues found — up to 2 retries)
+                    └────────────── back to Developer ──►
+                                          │
 Phase 4:  🚀  Deployer         →  Starts the app & verifies
 ```
 
-### Feedback Loops
+### Automatic Feedback Loops
 
-If **Tester** finds failures or **Deployer** can't start the app, the pipeline automatically routes back to **Developer** for fixes — up to 2 retries per quality gate. No manual intervention needed.
+If any quality agent finds problems, it automatically routes back to **Developer** for fixes:
+
+| Quality Gate | Trigger | Max retries |
+|---|---|---|
+| Error Checker | Type errors / bugs | 2 |
+| Tester | Failing tests | 2 |
+| Reviewer | Critical code issues | 1 |
+| Deployer | App won't start | 1 |
+
+No manual intervention needed.
 
 ---
 
 ## 🖥️ Live Dashboard
 
-Open your browser to `http://localhost:3847` after running `orchestra-ai`.
+After running `orchestra-ai`, your browser opens automatically. The port defaults to **3847** but is reassigned automatically if that port is already in use.
 
 **What you see:**
 - Hub-and-spoke pipeline visualization with animated agents
 - Live output stream from each agent as it works
 - Real-time cost tracker (tokens + USD per agent)
-- Feedback loop arrows when quality issues are routed back
+- Feedback loop arrows when quality issues are routed back to Developer
 - Result card with clickable localhost URLs when the app is ready
+
+---
+
+## 💰 Cost
+
+### Claude Max subscription (Option A)
+**No token costs** — usage counts against your Claude Max plan limits, shown live in the Usage panel (session 5h window + weekly 7-day window).
+
+### Anthropic API key (Option B)
+You pay per token. Current model pricing:
+
+| Model | Input | Output |
+|-------|-------|--------|
+| Claude Opus 4.6 *(most capable)* | $5 / 1M tokens | $25 / 1M tokens |
+| Claude Sonnet 4.6 *(recommended)* | $3 / 1M tokens | $15 / 1M tokens |
+| Claude Haiku 4.5 *(fastest/cheapest)* | $1 / 1M tokens | $5 / 1M tokens |
+
+> Prices may change — always check [anthropic.com/pricing](https://www.anthropic.com/pricing) for the latest.
+
+A typical full-stack project (all 9 agents, Sonnet) runs approximately **$0.50 – $3.00** depending on project complexity. You can reduce cost by using Haiku for subagents in Settings.
+
+Orchestra always uses the **latest stable model** in each family — no hardcoded dates that go stale.
 
 ---
 
@@ -119,10 +153,10 @@ Everything is configurable from the **Settings** page in the web UI. Config is s
 
 **Available settings:**
 - Anthropic API key
-- GitHub token (for repo creation)
+- GitHub token (for repo creation during projects)
 - Default projects folder
-- Main model (Opus / Sonnet / Haiku)
-- Subagent model (can use a cheaper model for quality agents)
+- Main model (Opus 4.6 / Sonnet 4.6 / Haiku 4.5)
+- Subagent model (use a cheaper model for quality agents to reduce cost)
 - Extended thinking on/off
 - Budget limit per project (USD)
 - Max turns limit
@@ -148,19 +182,7 @@ Enable/disable each from **Settings → MCP Servers**.
 
 ---
 
-## 💰 Model Pricing Reference
-
-| Model | Input | Output |
-|-------|-------|--------|
-| Claude Opus 4 | $5 / 1M tokens | $25 / 1M tokens |
-| Claude Sonnet 4 | $3 / 1M tokens | $15 / 1M tokens |
-| Claude Haiku 4.5 | $1 / 1M tokens | $5 / 1M tokens |
-
-A typical full-stack project (all agents) runs **$0.50 – $3.00** depending on complexity and model choice.
-
----
-
-## 📂 Project Types
+## 📂 Project Templates
 
 Orchestra includes built-in prompt templates for:
 
@@ -174,9 +196,9 @@ Orchestra includes built-in prompt templates for:
 
 ## 🪟 Windows-Specific Notes
 
-- Paths use backslashes internally but Orchestra handles this automatically
-- The `orchestra-ai` command is available in PowerShell, CMD, and Windows Terminal after install
-- If Claude Code CLI is used (Option A), Orchestra detects `claude.cmd` automatically on Windows
+- Paths use platform-native separators — handled automatically
+- The `orchestra-ai` command works in PowerShell, CMD, and Windows Terminal
+- If using Claude Code CLI (Option A), Orchestra detects `claude.cmd` automatically
 - Projects are saved to `C:\Users\YourName\orchestra-projects\` by default
 
 ---

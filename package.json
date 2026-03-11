@@ -4,7 +4,7 @@
   "description": "AI-powered multi-agent project orchestrator with web UI. One command to build anything.",
   "type": "module",
   "bin": {
-    "orchestra-ai": "./dist/cli/index.mjs"
+    "orchestra-ai": "dist/cli/index.mjs"
   },
   "files": [
     "dist/",
@@ -42,7 +42,7 @@
   "homepage": "https://github.com/miguel2862/orchestra-ai#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/miguel2862/orchestra-ai.git"
+    "url": "git+https://github.com/miguel2862/orchestra-ai.git"
   },
   "bugs": {
     "url": "https://github.com/miguel2862/orchestra-ai/issues"
