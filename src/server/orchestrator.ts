@@ -8,7 +8,7 @@ import { broadcast } from "./websocket.js";
 import { loadConfig } from "./config.js";
 import { getTemplate } from "./templates.js";
 import { buildMcpServerConfig } from "./mcp.js";
-import { createProject, updateProject, appendProjectEvent, getProject } from "./project-store.js";
+import { createProject, updateProject, appendProjectEvent, getProject, getProjectEvents } from "./project-store.js";
 import { initGitRepo, commitTask } from "./git-manager.js";
 import { estimateCost } from "./cost-tracker.js";
 import { formatLessonsForPrompt, extractLessonsFromRun, extractLessonsFromFeedback, extractLessonsFromFeedbackLoops, extractLessonsFromRuntimeFailures } from "./lessons.js";
@@ -65,6 +65,8 @@ const REQUIRED_PIPELINE_AGENTS: string[] = [
   "visual_tester",
 ];
 const DEFAULT_SUBAGENT_STALL_TIMEOUT_MS = 10 * 60 * 1000;
+const LOCAL_URL_REGEX = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):(\d+)(?:[^\s)"`']*)?/gi;
+const RUNTIME_URL_REPORT_FILES = ["ORCHESTRA_REPORT.md", "VISUAL_TEST_REPORT.md", "TEST_REPORT.md"];
 const SUBAGENT_STALL_TIMEOUT_BY_AGENT_MS: Record<string, number> = {
   product_manager: 8 * 60 * 1000,
   architect: 15 * 60 * 1000,
@@ -401,39 +403,6 @@ function validateSubagentRuntimeGate(agent: string, workingDir: string, evidence
   return failures.length > 0 ? failures.join("; ") : null;
 }
 
-function cleanupWorkingDirListeners(workingDir: string): string[] {
-  try {
-    const discoverScript = `WORKDIR=${JSON.stringify(workingDir)}
-lsof -nP -iTCP -sTCP:LISTEN -t 2>/dev/null | while read -r pid; do
-  [ -n "$pid" ] || continue
-  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
-  case "$cwd" in
-    "$WORKDIR"|"$WORKDIR"/*)
-      port=$(lsof -Pan -a -p "$pid" -iTCP -sTCP:LISTEN -Fn 2>/dev/null | sed -n 's/^n.*://p' | head -n1)
-      echo "$pid:$port"
-      ;;
-  esac
-done | sort -u`;
-    const discovered = execSync(`bash -lc ${JSON.stringify(discoverScript)}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    if (!discovered) return [];
-
-    const entries = discovered.split(/\n+/).map((line) => line.trim()).filter(Boolean);
-    const pids = entries.map((entry) => entry.split(":")[0]).filter(Boolean);
-    if (pids.length === 0) return [];
-
-    const cleanupScript = `pids=(${pids.join(" ")})
-kill -TERM ${pids.join(' ')} 2>/dev/null || true
-sleep 1
-for pid in ${pids.join(' ')}; do
-  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
-done`;
-    execSync(`bash -lc ${JSON.stringify(cleanupScript)}`, { stdio: ["ignore", "ignore", "ignore"] });
-    return entries;
-  } catch {
-    return [];
-  }
-}
-
 function validateProjectRuntimeGates(
   workingDir: string,
   usesDB: boolean,
@@ -469,7 +438,161 @@ function validateProjectRuntimeGates(
   return failures;
 }
 
-// ── Shared agent definitions ─────────────────────────────────────────────────
+function extractLocalPortsFromText(text: string): number[] {
+  const ports = new Set<number>();
+  for (const match of text.matchAll(LOCAL_URL_REGEX)) {
+    const port = Number(match[1]);
+    if (Number.isInteger(port) && port > 0 && port < 65536) {
+      ports.add(port);
+    }
+  }
+  return [...ports];
+}
+
+function collectCleanupPorts(projectId: string, workingDir: string): number[] {
+  const ports = new Set<number>();
+
+  try {
+    for (const event of getProjectEvents(projectId)) {
+      for (const port of extractLocalPortsFromText(JSON.stringify(event))) {
+        ports.add(port);
+      }
+    }
+  } catch {}
+
+  for (const file of RUNTIME_URL_REPORT_FILES) {
+    const reportPath = join(workingDir, file);
+    if (!existsSync(reportPath)) continue;
+    try {
+      for (const port of extractLocalPortsFromText(readFileSync(reportPath, "utf-8"))) {
+        ports.add(port);
+      }
+    } catch {}
+  }
+
+  return [...ports].sort((a, b) => a - b);
+}
+
+function cleanupListenersByPorts(ports: number[]): string[] {
+  if (ports.length === 0) return [];
+
+  try {
+    if (process.platform === "win32") {
+      const script = `$ports = @(${ports.join(",")})
+$results = New-Object System.Collections.Generic.List[string]
+foreach ($port in $ports) {
+  try {
+    $connections = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object OwningProcess, LocalPort -Unique
+    foreach ($conn in $connections) {
+      $pid = [int]$conn.OwningProcess
+      if ($pid -le 0) { continue }
+      try { Stop-Process -Id $pid -ErrorAction SilentlyContinue } catch {}
+      Start-Sleep -Milliseconds 500
+      try { Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue } catch {}
+      $results.Add(("$pid" + ":" + $conn.LocalPort))
+    }
+  } catch {}
+}
+$results | Sort-Object -Unique`;
+
+      const output = execSync(`powershell -NoProfile -Command ${JSON.stringify(script)}`, {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      return output ? output.split(/\r?\n+/).map((line) => line.trim()).filter(Boolean) : [];
+    }
+
+    const portScript = `for port in ${ports.join(" ")}; do
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | while read -r pid; do
+    [ -n "$pid" ] || continue
+    echo "$pid:$port"
+  done
+done | sort -u`;
+    const discovered = execSync(`bash -lc ${JSON.stringify(portScript)}`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!discovered) return [];
+
+    const entries = discovered.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const pids = [...new Set(entries.map((entry) => entry.split(":")[0]).filter(Boolean))];
+    if (pids.length === 0) return entries;
+
+    const cleanupScript = `kill -TERM ${pids.join(" ")} 2>/dev/null || true
+sleep 1
+for pid in ${pids.join(" ")}; do
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+done`;
+    execSync(`bash -lc ${JSON.stringify(cleanupScript)}`, { stdio: ["ignore", "ignore", "ignore"] });
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+function cleanupWorkingDirListeners(projectId: string, workingDir: string): string[] {
+  const portMatches = cleanupListenersByPorts(collectCleanupPorts(projectId, workingDir));
+  if (portMatches.length > 0 || process.platform === "win32") {
+    return portMatches;
+  }
+
+  try {
+    const discoverScript = `WORKDIR=${JSON.stringify(workingDir)}
+lsof -nP -iTCP -sTCP:LISTEN -t 2>/dev/null | while read -r pid; do
+  [ -n "$pid" ] || continue
+  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
+  case "$cwd" in
+    "$WORKDIR"|"$WORKDIR"/*)
+      port=$(lsof -Pan -a -p "$pid" -iTCP -sTCP:LISTEN -Fn 2>/dev/null | sed -n 's/^n.*://p' | head -n1)
+      echo "$pid:$port"
+      ;;
+  esac
+done | sort -u`;
+    const discovered = execSync(`bash -lc ${JSON.stringify(discoverScript)}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (!discovered) return [];
+
+    const entries = discovered.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const pids = entries.map((entry) => entry.split(":")[0]).filter(Boolean);
+    if (pids.length === 0) return [];
+
+    const cleanupScript = `pids=(${pids.join(" ")})
+kill -TERM ${pids.join(" ")} 2>/dev/null || true
+sleep 1
+for pid in ${pids.join(" ")}; do
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+done`;
+    execSync(`bash -lc ${JSON.stringify(cleanupScript)}`, { stdio: ["ignore", "ignore", "ignore"] });
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+function buildHostPlatformPromptNote(): string {
+  if (process.platform === "win32") {
+    return [
+      "",
+      "## HOST OS",
+      "- The orchestration host is Windows. Do NOT assume Unix shell syntax.",
+      "- For long-running local processes, prefer PowerShell or cmd-safe wrappers over bare \`&\`.",
+      "- Good Windows patterns:",
+      "  - \`powershell -NoProfile -Command \"$p = Start-Process npm.cmd -ArgumentList 'run','dev' -PassThru; $p.Id\"\`",
+      "  - \`powershell -NoProfile -Command \"(Invoke-WebRequest http://localhost:PORT -UseBasicParsing).StatusCode\"\`",
+      "  - \`powershell -NoProfile -Command \"Stop-Process -Id PID -Force\"\`",
+      "  - \`taskkill /PID PID /F\`",
+      "- If npm or npx wrappers are needed, prefer \`npm.cmd\` and \`npx.cmd\` on Windows.",
+      "- Only use Unix-specific commands when you have confirmed the environment is Git Bash or WSL.",
+    ].join("\n");
+  }
+
+  return [
+    "",
+    "## HOST OS",
+    `- The orchestration host is ${process.platform === "darwin" ? "macOS" : "Linux"}. Use commands compatible with the host OS and avoid unnecessary platform assumptions.`,
+  ].join("\n");
+}
+
+// ── Shared agent definitions ──────────────────────────────────────────────────
 
 function buildAgentDefinitions(
   projectConfig: ProjectConfig,
@@ -479,6 +602,7 @@ function buildAgentDefinitions(
 ): Record<string, { description: string; prompt: string; tools: string[]; [k: string]: unknown }> {
   const rc = loadOrchestraRC(projectConfig.workingDir);
   const stackGuardrails = formatStackGuardrails(projectConfig, rc);
+  const hostPlatformNote = buildHostPlatformPromptNote();
   const repoModeNote = getProjectMode(projectConfig) === "existing"
     ? `
 
@@ -486,8 +610,8 @@ function buildAgentDefinitions(
 - This repository already exists. Audit before editing.
 - Prefer minimal diffs and preserve the current structure, conventions, scripts, CI, and design system.
 - Extend existing modules before creating replacements or parallel systems.
-- Treat the orchestrator's preferred commands, scope boundaries, and read-only paths as binding context.${stackGuardrails}`
-    : stackGuardrails;
+- Treat the orchestrator's preferred commands, scope boundaries, and read-only paths as binding context.${stackGuardrails}${hostPlatformNote}`
+    : `${stackGuardrails}${hostPlatformNote}`;
   const agents: Record<string, { description: string; prompt: string; tools: string[]; [k: string]: unknown }> = {
     product_manager: {
       description: "Senior product manager for requirements analysis, user stories, and PRD creation.",
@@ -1040,17 +1164,23 @@ Run these in order, fixing errors at each step before proceeding:
    - Repeat until clean
 
 ## PHASE 5 — RUNTIME VERIFICATION
-1. Start the app in background: \`npm run dev &\` or \`python main.py &\`
+1. Start the app in background using a command compatible with the host OS
+   - POSIX example: \`npm run dev > .orchestra/runtime.log 2>&1 & echo $!\`
+   - Windows example: \`powershell -NoProfile -Command "$p = Start-Process npm.cmd -ArgumentList 'run','dev' -PassThru; $p.Id"\`
 2. Wait 5-8 seconds for startup
 3. Check for runtime errors:
    - Read stderr output — any uncaught exceptions?
-   - Hit the main URL with curl: \`curl -s -o /dev/null -w "%{http_code}" http://localhost:PORT\`
-   - If it has a web frontend: curl the HTML and check for:
+   - Hit the main URL with platform-compatible HTTP tooling:
+     - POSIX: \`curl -s -o /dev/null -w "%{http_code}" http://localhost:PORT\`
+     - Windows: \`powershell -NoProfile -Command "(Invoke-WebRequest http://localhost:PORT -UseBasicParsing).StatusCode"\`
+   - If it has a web frontend: fetch the HTML and check for:
      - Missing script references (404 on JS/CSS files)
      - Integrity hash mismatches on CDN scripts
      - \`type="module"\` conflicts with global CDN libraries (jQuery, Chart.js via CDN)
 4. If errors found: fix source code, restart, re-verify
-5. Kill the background process when done: \`kill %1\` or \`pkill -f "node|python"\`
+5. Kill the background process when done using a platform-compatible command
+   - POSIX: \`kill PID\`
+   - Windows: \`powershell -NoProfile -Command "Stop-Process -Id PID -Force"\` or \`taskkill /PID PID /F\`
 
 ## COMMON ERROR PATTERNS (check for these specifically)
 
@@ -1361,10 +1491,14 @@ MANDATORY WORKFLOW:
      - For Node.js: prefer \`npm run dev\` (or \`npm start\` if no dev script)
      - For Python: prefer \`python main.py\` or \`python app.py\` or \`uvicorn\`/\`flask run\`
      - For static sites: \`npx serve dist\` or \`npx http-server build\`
-   - Start the server/app in background (e.g. \`npm run dev &\` or \`python main.py &\`)
+   - Start the server/app in background using host-compatible commands
+     - POSIX example: \`npm run dev > .orchestra/runtime.log 2>&1 & echo $!\`
+     - Windows example: \`powershell -NoProfile -Command "$p = Start-Process npm.cmd -ArgumentList 'run','dev' -PassThru; $p.Id"\`
    - Wait 8 seconds for startup
    - If the project has a data pipeline/seed script (e.g. pipeline/, seeds/, init_data), run it now
-   - Hit the main URL with curl to confirm it responds with 200
+   - Hit the main URL with host-compatible HTTP tooling to confirm it responds with 200
+     - POSIX: \`curl -s -o /dev/null -w "%{http_code}" URL\`
+     - Windows: \`powershell -NoProfile -Command "(Invoke-WebRequest URL -UseBasicParsing).StatusCode"\`
    - Check server logs for any startup errors
    - If any errors: fix them, restart, verify again
    - Keep the process alive long enough for visual_tester to use it in the same pipeline run
@@ -1887,7 +2021,7 @@ async function runAgent(
   } finally {
     if (stallWatchdog) clearInterval(stallWatchdog);
     activeProjects.delete(projectId);
-    const cleanedListeners = cleanupWorkingDirListeners(projectConfig.workingDir);
+    const cleanedListeners = cleanupWorkingDirListeners(projectId, projectConfig.workingDir);
     if (cleanedListeners.length > 0) {
       emit(projectId, {
         type: "agent_message",
@@ -1953,7 +2087,7 @@ export async function stopProject(projectId: string): Promise<void> {
   const project = await getProject(projectId);
   const q = activeProjects.get(projectId);
   if (q) { q.close(); activeProjects.delete(projectId); }
-  const cleanedListeners = project ? cleanupWorkingDirListeners(project.config.workingDir) : [];
+  const cleanedListeners = project ? cleanupWorkingDirListeners(projectId, project.config.workingDir) : [];
   await updateProject(projectId, {
     status: "stopped",
     result: "Stopped by user.",
@@ -2260,7 +2394,7 @@ async function runResumedAgent(
     } catch {}
   } finally {
     activeProjects.delete(projectId);
-    const cleanedListeners = cleanupWorkingDirListeners(projectConfig.workingDir);
+    const cleanedListeners = cleanupWorkingDirListeners(projectId, projectConfig.workingDir);
     if (cleanedListeners.length > 0) {
       emit(projectId, {
         type: "agent_message",
@@ -2389,6 +2523,24 @@ function buildHardRulesSection(totalAgents: number, stackGuardrails: string, mod
 9. visual_tester is a blocking gate. Do not complete the project unless it used real browser MCP tools and verified the changed flows.${mode === "existing" ? "\n10. Existing repo mode is DELTA-ONLY: audit before editing, preserve conventions, and do not rewrite unrelated systems." : ""}${stackGuardrails}`;
 }
 
+function buildHostPlatformSection(): string {
+  if (process.platform === "win32") {
+    return [
+      "## HOST PLATFORM",
+      "- The host platform is Windows.",
+      "- When delegating tasks that start or stop local processes, explicitly tell agents to use PowerShell/cmd-safe commands instead of assuming Unix shell syntax.",
+      "- Prefer \`npm.cmd\` / \`npx.cmd\` when Windows wrappers are required.",
+      "- For HTTP checks use \`Invoke-WebRequest\` when curl or Unix redirection patterns are unreliable.",
+    ].join("\n");
+  }
+
+  return [
+    "## HOST PLATFORM",
+    `- The host platform is ${process.platform === "darwin" ? "macOS" : "Linux"}.`,
+    "- Use commands compatible with the host OS and avoid unnecessary platform assumptions.",
+  ].join("\n");
+}
+
 function buildUiUxSection(mode: "new" | "existing"): string {
   return `## UI/UX
 Today's date: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
@@ -2439,6 +2591,8 @@ ${buildAgentTeamTable(usesDB, !!pushGH, mode)}
 
 ${buildProjectSection(projectConfig, mode)}
 
+${buildHostPlatformSection()}
+
 ${buildForwardPassSection(projectConfig, usesDB, mode)}
 
 ${buildFeedbackLoopSection(mode)}
@@ -2461,6 +2615,7 @@ function buildPrompt(projectConfig: ProjectConfig): string {
   const usesDB = projectUsesDatabase(projectConfig);
   const rc = loadOrchestraRC(projectConfig.workingDir);
   const stackGuardrails = formatStackGuardrails(projectConfig, rc);
+  const hostPlatformSection = buildHostPlatformSection();
 
   if (mode === "existing") {
     return `Continue this existing project by delegating to your specialized subagents.
@@ -2476,6 +2631,8 @@ Preferred Test Command: ${formatPromptValue(projectConfig.testCommand)}
 Preferred Lint/Typecheck Command: ${formatPromptValue(projectConfig.lintCommand)}
 Read-only Paths: ${formatPromptValue(projectConfig.readonlyPaths)}
 Stack: ${projectConfig.techStack || "Detect from repository"}
+
+${hostPlatformSection}
 
 START NOW — execute the full existing-project pipeline:
 0. Task(subagent_type="product_manager", description="Audit repo and write delta change plan", prompt="Inspect the repository before planning. Read manifests, entrypoints, nearby modules, tests, routes, infra, and any files relevant to this request. Write PRD.md as a DELTA change plan for: ${projectConfig.businessNeed}. Include current-state summary, affected modules, acceptance criteria, explicit in-scope/out-of-scope boundaries, regression risks, and rollout notes. Do not propose a rewrite.")
@@ -2504,6 +2661,8 @@ Project: ${projectConfig.name}
 Business Need: ${projectConfig.businessNeed}
 Technical Approach: ${projectConfig.technicalApproach}
 Stack: ${projectConfig.techStack || "Architect decides"}
+
+${hostPlatformSection}
 
 START NOW — execute the full pipeline:
 0. Task(subagent_type="product_manager", description="Write PRD with user stories and requirements", prompt="Write PRD.md for: ${projectConfig.businessNeed}. Include user personas, 8+ user stories, functional requirements, non-functional requirements, and edge cases.")

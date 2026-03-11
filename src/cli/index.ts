@@ -40,6 +40,19 @@ async function checkClaudeCode(): Promise<{
   }
 }
 
+async function warnIfWindowsShellMayBeMissing(): Promise<void> {
+  if (process.platform !== "win32") return;
+
+  try {
+    execSync("bash --version", { stdio: "pipe", timeout: 5000 });
+  } catch {
+    const chalk = (await import("chalk")).default;
+    console.log(chalk.yellow("\n  ⚠ Bash-compatible shell not found.\n"));
+    console.log("  Orchestra can run on Windows, but agent tasks work more reliably with Git Bash or WSL available.");
+    console.log("  If a task shell fails to start, install Git for Windows (includes Git Bash) and retry.\n");
+  }
+}
+
 async function ensureClaudeReady(): Promise<void> {
   const chalk = (await import("chalk")).default;
   const config = loadConfig();
@@ -100,6 +113,7 @@ async function main(): Promise<void> {
 
   // Pre-flight: ensure Claude Code is ready or API key is set
   await ensureClaudeReady();
+  await warnIfWindowsShellMayBeMissing();
 
   const { startServer } = await import("../server/index.js");
   const { openBrowser } = await import("./open-browser.js");

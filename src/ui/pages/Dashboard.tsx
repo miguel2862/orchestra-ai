@@ -188,7 +188,7 @@ function ResultCard({ result }: { result: string }) {
   const cleaned = result.replace(/^-{3,}\s*\n?/, "").trim();
 
   // Find all localhost URLs for quick-launch buttons
-  const urlRegex = /https?:\/\/localhost:[0-9]+[^\s)"`']*/g;
+  const urlRegex = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):[0-9]+[^\s)"`']*/g;
   const urls = [...new Set(cleaned.match(urlRegex) ?? [])];
 
   // Split text into segments: plain text and URLs

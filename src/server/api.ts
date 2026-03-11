@@ -17,6 +17,10 @@ function isMaskedSecret(value: unknown): value is string {
   return typeof value === "string" && /^\*{4}.{0,}$/.test(value);
 }
 
+function getNpxCommand(): string {
+  return process.platform === "win32" ? "npx.cmd" : "npx";
+}
+
 export function setupApiRoutes(app: Express): void {
   // ── Config ──
   app.get("/api/config", (_req, res) => {
@@ -223,7 +227,7 @@ export function setupApiRoutes(app: Express): void {
   app.post("/api/playwright/install", async (_req, res) => {
     try {
       const { execSync } = await import("node:child_process");
-      execSync("npx -y playwright install chromium", {
+      execSync(`${getNpxCommand()} -y playwright install chromium`, {
         stdio: "pipe",
         timeout: 120000,
       });

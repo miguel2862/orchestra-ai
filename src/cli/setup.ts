@@ -1,6 +1,7 @@
 import { input, confirm, select } from "@inquirer/prompts";
 import chalk from "chalk";
 import ora from "ora";
+import open from "open";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
@@ -11,6 +12,23 @@ import {
   DEFAULT_MAX_BUDGET_USD,
 } from "../shared/constants.js";
 import type { OrchestraConfig } from "../shared/types.js";
+
+function getNpxCommand(): string {
+  return process.platform === "win32" ? "npx.cmd" : "npx";
+}
+
+async function openExternalUrl(url: string): Promise<void> {
+  try {
+    await open(url);
+    return;
+  } catch {}
+
+  try {
+    const openCmd = process.platform === "darwin" ? "open" :
+      process.platform === "win32" ? "start" : "xdg-open";
+    execSync(`${openCmd} ${JSON.stringify(url)}`, { stdio: "pipe" });
+  } catch {}
+}
 
 export async function runSetup(): Promise<void> {
   console.log(
@@ -94,13 +112,7 @@ export async function runSetup(): Promise<void> {
           console.log(`  2. Enter code: ${chalk.bold.yellow(userCode)}`);
           console.log();
           console.log(chalk.dim("  Waiting for authorization..."));
-
-          // Try to open the browser automatically
-          try {
-            const openCmd = process.platform === "darwin" ? "open" :
-                           process.platform === "win32" ? "start" : "xdg-open";
-            execSync(`${openCmd} ${verificationUri}`, { stdio: "pipe" });
-          } catch { /* ignore — user can open manually */ }
+          void openExternalUrl(verificationUri);
         });
 
         console.log(chalk.green("\n  ✓ GitHub connected successfully!\n"));
@@ -163,7 +175,7 @@ export async function runSetup(): Promise<void> {
   // 7. Install Playwright browser for Visual Tester agent
   const playwrightSpinner = ora("Installing Playwright browser for visual testing...").start();
   try {
-    execSync("npx -y playwright install chromium", {
+    execSync(`${getNpxCommand()} -y playwright install chromium`, {
       stdio: "pipe",
       timeout: 120000,
     });
@@ -182,13 +194,7 @@ export async function runSetup(): Promise<void> {
   if (wantsGemini) {
     console.log(chalk.dim("  Get a free API key at: https://aistudio.google.com"));
     console.log(chalk.dim("  Sign in with your Google account → Create API key → Copy it\n"));
-
-    // Try to open the browser
-    try {
-      const openCmd = process.platform === "darwin" ? "open" :
-                     process.platform === "win32" ? "start" : "xdg-open";
-      execSync(`${openCmd} https://aistudio.google.com/apikey`, { stdio: "pipe" });
-    } catch { /* ignore */ }
+    await openExternalUrl("https://aistudio.google.com/apikey");
 
     geminiApiKey = await input({
       message: "Gemini API Key (AIza...):",
@@ -285,10 +291,7 @@ export async function runPostUpdateSetup(existingConfig: OrchestraConfig): Promi
             existingConfig.githubToken = await githubDeviceFlow((code, uri) => {
               console.log(`\n  📋 Open: ${chalk.cyan(uri)}`);
               console.log(`  Enter code: ${chalk.bold.yellow(code)}\n`);
-              try {
-                const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-                execSync(`${openCmd} ${uri}`, { stdio: "pipe" });
-              } catch { /* ignore */ }
+              void openExternalUrl(uri);
             });
             console.log(chalk.green("  ✓ GitHub connected!\n"));
             updated = true;
@@ -311,10 +314,7 @@ export async function runPostUpdateSetup(existingConfig: OrchestraConfig): Promi
 
       if (wantsGemini) {
         console.log(chalk.dim("  Get a free key at: https://aistudio.google.com\n"));
-        try {
-          const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-          execSync(`${openCmd} https://aistudio.google.com/apikey`, { stdio: "pipe" });
-        } catch { /* ignore */ }
+        await openExternalUrl("https://aistudio.google.com/apikey");
 
         const key = await input({
           message: "Gemini API Key (AIza..., or Enter to skip):",
@@ -327,7 +327,7 @@ export async function runPostUpdateSetup(existingConfig: OrchestraConfig): Promi
     // Playwright install
     const playwrightSpinner = ora("Installing Playwright browser...").start();
     try {
-      execSync("npx -y playwright install chromium", { stdio: "pipe", timeout: 120000 });
+      execSync(`${getNpxCommand()} -y playwright install chromium`, { stdio: "pipe", timeout: 120000 });
       playwrightSpinner.succeed("Playwright browser installed");
     } catch {
       playwrightSpinner.warn("Playwright install skipped");

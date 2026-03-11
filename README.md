@@ -679,6 +679,9 @@ Check that port 3847, or whichever port it picked, is not blocked by a firewall.
 - Paths use platform-native separators — handled automatically
 - `orchestra-ai` works in PowerShell, CMD, and Windows Terminal
 - Orchestra auto-detects `claude.cmd` when using Claude subscription auth
+- Playwright install and browser verification use Windows-safe `npx.cmd` invocations
+- Temporary app listeners are cleaned up with Windows process APIs after verification
+- If an agent shell fails to start on Windows, install Git for Windows (Git Bash) or WSL for the most reliable task-shell compatibility
 - Projects default to `C:\Users\YourName\orchestra-projects\`
 
 ---
