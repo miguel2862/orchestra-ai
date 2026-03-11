@@ -2,28 +2,149 @@
 
 # 🎵 Orchestra AI
 
-### Build entire projects with a single command — powered by Claude
+### From idea to running app — fully autonomous.
 
-[![npm](https://img.shields.io/npm/v/orchestra-ai-app?color=7c3aed&label=npm&logo=npm)](https://www.npmjs.com/package/orchestra-ai-app)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?logo=node.js)](https://nodejs.org)
+[![npm](https://img.shields.io/npm/v/orchestra-ai-app?color=7c3aed&label=npm&logo=npm&logoColor=white)](https://www.npmjs.com/package/orchestra-ai-app)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?logo=node.js&logoColor=white)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?logo=github)](https://github.com/miguel2862/orchestra-ai)
+[![Powered by Claude](https://img.shields.io/badge/powered%20by-Claude-orange?logo=anthropic&logoColor=white)](https://anthropic.com)
 
-Orchestra AI orchestrates **9 specialized AI agents** that take your idea from requirements to a running app — automatically. A live web dashboard shows every agent working in real time.
+<br/>
+
+**You describe a project. Nine specialized AI agents collaborate to build it — writing code, running tests, fixing bugs, and deploying — all without you lifting a finger.**
+
+<br/>
+
+[📦 npm package](https://www.npmjs.com/package/orchestra-ai-app) · [🐛 Issues](https://github.com/miguel2862/orchestra-ai/issues) · [🤖 Powered by Claude Agent SDK](https://github.com/anthropics/claude-code)
 
 </div>
 
 ---
 
-## ✨ What it does
+## ⚡ Three steps. One running app.
 
-You describe a project. Orchestra runs a full pipeline of AI agents — each one specialized — that collaborate to build it:
+```bash
+npm install -g orchestra-ai-app   # 1. install
+orchestra-ai                       # 2. run
+# 3. describe your project in the browser — agents do the rest
+```
+
+A browser window opens automatically. Nine agents start working. You watch the live dashboard.
+
+---
+
+## 🏗️ Architecture — Star Topology, not a pipeline
+
+Most AI coding tools run agents in a straight line: A → B → C → D.
+If D fails, the build stops. You start over.
+
+**Orchestra is different.** The **Developer** agent sits at the center of a star. Every quality agent — Error Checker, Security, Tester, Reviewer — branches out from Developer, and can loop *back* to Developer with a detailed report when they find problems. Failures become **automatic retries**, not dead ends.
+
+```mermaid
+flowchart TD
+    IDEA(["💡 Your Idea"])
+
+    IDEA --> PM
+
+    PM["🧠 Product Manager\nWrites requirements & PRD"]
+    PM --> ARCH
+
+    ARCH["🏛️ Architect\nDesigns system & picks stack"]
+    ARCH --> DEV
+
+    DEV["💻 Developer\n\n  ★  HUB  ★\n\nCenter of the star.\nAll quality agents\nreport back here."]
+
+    DEV --> EC
+    DEV --> SEC
+    DEV --> TEST
+    DEV --> REV
+    DEV -.- DB[("🗄️ Database\noptional")]
+
+    EC["🔍 Error Checker\nType errors & bugs"]
+    SEC["🔒 Security\nVulnerabilities & CVEs"]
+    TEST["🧪 Tester\nUnit & integration tests"]
+    REV["👁️ Reviewer\nCode quality & patterns"]
+
+    EC -.->|"❌ issues found — retry × 2"| DEV
+    SEC -.->|"❌ CVE found — retry × 1"| DEV
+    TEST -.->|"❌ tests fail — retry × 2"| DEV
+    REV -.->|"❌ critical issues — retry × 1"| DEV
+
+    EC --> DEPLOY
+    SEC --> DEPLOY
+    TEST --> DEPLOY
+    REV --> DEPLOY
+
+    DEPLOY["🚀 Deployer\nStarts & verifies the app"]
+    DEPLOY -.->|"❌ won't start — retry × 1"| DEV
+    DEPLOY --> DONE(["✅ Your app is live"])
+
+    style DEV fill:#4c1d95,color:#e9d5ff,stroke:#7c3aed,stroke-width:3px
+    style DONE fill:#064e3b,color:#d1fae5,stroke:#10b981,stroke-width:2px
+    style IDEA fill:#1e3a5f,color:#bfdbfe,stroke:#3b82f6,stroke-width:2px
+```
+
+> **Solid arrows** → forward pass (sequential phases).
+> **Dashed arrows** → feedback loops (automatic, only when issues are found).
+
+---
+
+## 🤖 The 9 agents — who does what
+
+| Agent | Phase | Role | Key tools |
+|-------|:-----:|------|-----------|
+| 🧠 **Product Manager** | `0 · Plan` | Clarifies scope and writes a full Product Requirements Doc | Memory, Web Search |
+| 🏛️ **Architect** | `1 · Design` | Chooses tech stack, designs folder structure, plans APIs | Web Search, Memory |
+| 💻 **Developer** | `2 · Build ⭐` | **Writes all the code.** The hub — receives from Architect, routes feedback from all quality agents | Filesystem, Search, Memory |
+| 🗄️ **Database** | `2 · Build` | Designs schema, writes migrations, seeds (only when project needs a DB) | Filesystem, Postgres |
+| 🔍 **Error Checker** | `3 · Quality` | Scans for TypeScript errors, syntax bugs, missing imports, runtime crashes | Filesystem |
+| 🔒 **Security** | `3 · Quality` | Finds injection flaws, insecure auth, exposed secrets, known CVEs | Web Search, Filesystem |
+| 🧪 **Tester** | `3 · Quality` | Writes and runs unit & integration tests, reports coverage | Filesystem, Browser |
+| 👁️ **Reviewer** | `3 · Quality` | Reviews code patterns, readability, coupling, and best practices | Filesystem |
+| 🚀 **Deployer** | `4 · Ship` | Starts the app, hits real endpoints, verifies it responds correctly | Browser, Filesystem |
+
+> **Phase 3 quality agents run in parallel.** They all check the same codebase simultaneously and independently route feedback to Developer.
+
+---
+
+## 🔄 Automatic feedback loops — how retries work
+
+When a quality agent finds a problem, it doesn't stop the build. It sends Developer a structured report:
+*what broke, where, why, and what to fix.* Developer fixes it. The quality agent re-checks.
 
 ```
-Your idea → PRD → Architecture → Code → Tests → Security → Deploy
+  Quality agent ──── ❌ issue report ────► Developer ──── fix ────► Quality agent re-checks
+       ▲                                                                       │
+       └───────────────────── up to N retries ───────────────────────────────┘
 ```
 
-No manual handoffs. No copy-pasting between AI chats. One command.
+| Quality gate | Triggers when… | Max retries |
+|---|---|:---:|
+| 🔍 **Error Checker** | TypeScript errors, syntax errors, runtime exceptions | **2** |
+| 🧪 **Tester** | Any unit or integration test is failing | **2** |
+| 🔒 **Security** | A critical vulnerability is detected | **1** |
+| 👁️ **Reviewer** | A critical code quality issue is flagged | **1** |
+| 🚀 **Deployer** | The app fails to start or endpoints don't respond | **1** |
+
+Once all quality gates pass (or retry limits are reached), the Deployer does a final launch. No manual intervention at any point.
+
+---
+
+## 🖥️ Live dashboard
+
+After running `orchestra-ai`, your browser opens automatically. You get a real-time view of everything happening:
+
+| Feature | What you see |
+|---------|-------------|
+| **Hub-and-spoke visualization** | The star topology rendered live — agents light up as they activate |
+| **Live output stream** | Every line each agent writes, thinks, and decides — in real time |
+| **Cost tracker** | Token count and USD per agent, updating as they run |
+| **Feedback loop arrows** | Animated amber arrows when a quality gate loops back to Developer |
+| **Result card** | Clickable `localhost` URL when your app is ready |
+| **History** | Every past run saved — browse previous projects and their full event logs |
+
+> Port defaults to **3847** but auto-reassigns if busy. You can run **multiple projects simultaneously** — each tracked independently.
 
 ---
 
@@ -45,113 +166,69 @@ npm install -g orchestra-ai-app
 orchestra-ai
 ```
 
-> **Note for Windows**: If you get an execution policy error, run:
-> ```powershell
-> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-> ```
+<details>
+<summary>Windows execution policy error?</summary>
 
-On first launch, a setup wizard runs automatically — it takes about 30 seconds.
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+Then re-run `orchestra-ai`.
+
+</details>
+
+On first launch, a **30-second setup wizard** runs automatically — auth method, GitHub token (optional), working directory, and theme.
 
 ---
 
 ## 📋 Requirements
 
-| Requirement | Details |
-|-------------|---------|
-| **Node.js** | v18 or higher — [download](https://nodejs.org) |
-| **Claude auth** | One of the two options below |
+| | |
+|--|--|
+| **Node.js** | v18 or higher — [download here](https://nodejs.org) |
+| **Claude auth** | Any plan below — Pro, Max, or API key |
 
 ### Which Anthropic plan do I need?
 
-| Plan | Monthly | Works with Orchestra? | Claude Code usage |
-|---|---|---|---|
-| **Claude Pro** | $20 | ✅ Yes | Included — lower usage limits |
-| **Claude Max 5x** | $100 | ✅ Yes | 5× more usage than Pro |
-| **Claude Max 20x** | $200 | ✅ Yes | 20× more usage than Pro |
-| **API key only** | Pay per token | ✅ Yes | Unlimited (billed per token) |
+| Plan | Price | Works? | Usage |
+|---|---|:---:|---|
+| **Claude Pro** | $20 / mo | ✅ | Included in plan — lower limits |
+| **Claude Max 5×** | $100 / mo | ✅ | 5× more usage than Pro |
+| **Claude Max 20×** | $200 / mo | ✅ | 20× more usage than Pro |
+| **API key only** | Pay per token | ✅ | No limits — billed directly |
 
-> **Pro, Max 5x, and Max 20x all include Claude Code** in the same subscription. The difference is how many tokens you can use per session and per week before hitting the limit. For daily heavy coding use, Max is recommended.
+> All plans share the same token pool with claude.ai. Max is recommended for heavy daily use.
 
----
-
-**Option A — Claude subscription (Pro or Max)** *(recommended — usage included in your plan)*
+**Option A — Claude subscription (Pro or Max)** *(recommended — usage included in plan)*
 ```bash
 npm install -g @anthropic-ai/claude-code
 claude login
 ```
 
-**Option B — Anthropic API key** *(pay per token — useful if you hit your plan limits or prefer direct billing)*
+**Option B — Anthropic API key** *(pay per token)*
 Get yours at [console.anthropic.com](https://console.anthropic.com) and paste it during the setup wizard.
-
----
-
-## 🤖 Star Topology Pipeline (non-linear)
-
-Orchestra uses a **star / hub-and-spoke architecture**, not a simple linear chain. The **Developer** agent sits at the center — it receives inputs from the orchestrator and routes feedback from all quality agents. This allows failed quality checks to loop back automatically without restarting the whole pipeline.
-
-```
-Phase 0:  🧠 Product Manager  →  Requirements & PRD
-Phase 1:  🏛  Architect        →  System design & tech stack
-                                          │
-Phase 2:  💻  Developer  ◄────────────── ┤  ← hub (all quality agents connect here)
-          🗄  Database (optional)         │
-                    │                     │
-        ┌───────────┼───────────┐         │
-Phase 3: 🔍 Error   🔒 Security  🧪 Tester  👁 Reviewer
-        └───────────┼───────────┘
-                    │  (feedback loops if issues found — up to 2 retries)
-                    └────────────── back to Developer ──►
-                                          │
-Phase 4:  🚀  Deployer         →  Starts the app & verifies
-```
-
-### Automatic Feedback Loops
-
-If any quality agent finds problems, it automatically routes back to **Developer** for fixes:
-
-| Quality Gate | Trigger | Max retries |
-|---|---|---|
-| Error Checker | Type errors / bugs | 2 |
-| Tester | Failing tests | 2 |
-| Reviewer | Critical code issues | 1 |
-| Deployer | App won't start | 1 |
-
-No manual intervention needed.
-
----
-
-## 🖥️ Live Dashboard
-
-After running `orchestra-ai`, your browser opens automatically. The port defaults to **3847** but is reassigned automatically if that port is already in use.
-
-**What you see:**
-- Hub-and-spoke pipeline visualization with animated agents
-- Live output stream from each agent as it works
-- Real-time cost tracker (tokens + USD per agent)
-- Feedback loop arrows when quality issues are routed back to Developer
-- Result card with clickable localhost URLs when the app is ready
 
 ---
 
 ## 💰 Cost
 
-### Claude Max subscription (Option A)
-**No token costs** — usage counts against your Claude Max plan limits, shown live in the Usage panel (session 5h window + weekly 7-day window).
+### With a Claude subscription
+**No extra token cost.** Usage counts against your plan's session and weekly limits. The dashboard shows both live.
 
-### Anthropic API key (Option B)
-You pay per token. Current model pricing:
+### With an API key
 
-| Model | Input | Output |
-|-------|-------|--------|
-| Claude Opus 4.6 *(most capable)* | $5 / 1M tokens | $25 / 1M tokens |
-| Claude Sonnet 4.6 *(recommended)* | $3 / 1M tokens | $15 / 1M tokens |
-| Claude Haiku 4.5 *(fastest/cheapest)* | $1 / 1M tokens | $5 / 1M tokens |
+| Model | Input | Output | Best for |
+|-------|------:|------:|---------|
+| **Opus 4.6** | $5 / 1M | $25 / 1M | Most complex, long projects |
+| **Sonnet 4.6** | $3 / 1M | $15 / 1M | ✅ Recommended balance |
+| **Haiku 4.5** | $1 / 1M | $5 / 1M | Fastest, cheapest |
 
-> Prices may change — always check [anthropic.com/pricing](https://www.anthropic.com/pricing) for the latest.
+A typical full-stack project (all 9 agents on Sonnet 4.6): **$0.50 – $3.00** depending on complexity.
+You can assign a cheaper model to quality-only agents in Settings to cut costs significantly.
 
-A typical full-stack project (all 9 agents, Sonnet) runs approximately **$0.50 – $3.00** depending on project complexity. You can reduce cost by using Haiku for subagents in Settings.
+> Always verify current prices at [anthropic.com/pricing](https://www.anthropic.com/pricing).
 
-Orchestra always uses the **latest stable model** in each family — no hardcoded dates that go stale.
+Orchestra always uses the **latest stable model** in each family — no hardcoded version dates that go stale.
 
 ---
 
@@ -164,80 +241,82 @@ Everything is configurable from the **Settings** page in the web UI. Config is s
 | macOS / Linux | `~/.orchestra-ai/config.json` |
 | Windows | `C:\Users\YourName\.orchestra-ai\config.json` |
 
-**Available settings:**
-- Anthropic API key
-- GitHub token (for repo creation during projects)
-- Default projects folder
-- Main model (Opus 4.6 / Sonnet 4.6 / Haiku 4.5)
-- Subagent model (use a cheaper model for quality agents to reduce cost)
-- Extended thinking on/off
-- Budget limit per project (USD)
-- Max turns limit
-- Git auto-commits
-- UI theme (dark / light / system)
+<details>
+<summary>All available settings</summary>
+
+| Setting | Description |
+|---------|-------------|
+| Anthropic API key | For API key auth (Option B) |
+| GitHub token | Lets agents create repos and push code |
+| Default projects folder | Where new projects are created |
+| Main model | Opus 4.6 / Sonnet 4.6 / Haiku 4.5 |
+| Subagent model | Use a cheaper model for quality gates |
+| Extended thinking | Deeper reasoning for complex projects |
+| Budget cap | Maximum USD spend per project |
+| Max turns | Hard limit on agent iterations |
+| Git auto-commits | Commit after each completed phase |
+| UI theme | Dark / Light / System |
+
+</details>
 
 ---
 
 ## 🧩 MCP Servers
 
-Orchestra uses the [Model Context Protocol](https://modelcontextprotocol.io) to give agents real tools:
+Orchestra uses the [Model Context Protocol](https://modelcontextprotocol.io) to give agents real tools — not just text generation:
 
-| Server | What it provides |
-|--------|-----------------|
-| `filesystem` | Read/write project files |
-| `brave-search` | Web search for docs & examples |
-| `github` | Create repos, push code |
-| `puppeteer` | Browser automation & screenshots |
-| `postgres` | Database inspection |
-| `memory` | Cross-agent persistent memory |
+| Server | Gives agents the ability to… |
+|--------|------------------------------|
+| `filesystem` | Read, write, and navigate project files |
+| `brave-search` | Search the web for docs, packages, examples |
+| `github` | Create repositories and push code |
+| `puppeteer` | Control a real browser — screenshots, UI testing |
+| `postgres` | Inspect and query databases live |
+| `memory` | Share persistent context across all agents |
 
-Enable/disable each from **Settings → MCP Servers**.
-
----
-
-## 📂 Project Templates
-
-Orchestra includes built-in prompt templates for:
-
-- **Full-stack web app** — React frontend + API backend
-- **API backend** — REST or GraphQL API
-- **Landing page** — Static site with modern design
-- **CLI tool** — Node.js command-line utility
-- **Custom** — Describe anything
+Enable or disable each server from **Settings → MCP Servers**.
 
 ---
 
-## 🪟 Windows-Specific Notes
+## 📂 Project templates
+
+| Template | What it builds |
+|----------|----------------|
+| **Full-stack web app** | React frontend + Node/Express API |
+| **API backend** | REST or GraphQL API with auth |
+| **Landing page** | Static site with modern design |
+| **CLI tool** | Node.js command-line utility |
+| **Custom** | Describe anything in plain English |
+
+---
+
+## 🪟 Windows notes
 
 - Paths use platform-native separators — handled automatically
-- The `orchestra-ai` command works in PowerShell, CMD, and Windows Terminal
-- If using Claude Code CLI (Option A), Orchestra detects `claude.cmd` automatically
-- Projects are saved to `C:\Users\YourName\orchestra-projects\` by default
+- `orchestra-ai` works in PowerShell, CMD, and Windows Terminal
+- Orchestra auto-detects `claude.cmd` when using Option A
+- Projects default to `C:\Users\YourName\orchestra-projects\`
 
 ---
 
 ## 🛠️ Development
 
-Clone and run locally:
+<details>
+<summary>Run locally from source</summary>
 
 ```bash
 git clone https://github.com/miguel2862/orchestra-ai.git
 cd orchestra-ai
 npm install
-npm run dev     # starts server + UI in watch mode
+npm run dev        # starts server + UI in watch mode
 ```
-
-Build for production:
 
 ```bash
-npm run build
+npm run build      # production build
+npm run typecheck  # TypeScript check with no emit
 ```
 
-Typecheck:
-
-```bash
-npm run typecheck
-```
+</details>
 
 ---
 
@@ -249,6 +328,6 @@ MIT — free to use, modify, and distribute.
 
 <div align="center">
 
-Built with [Claude Agent SDK](https://github.com/anthropics/claude-code) by Anthropic
+Built with the [Claude Agent SDK](https://github.com/anthropics/claude-code) by Anthropic
 
 </div>
