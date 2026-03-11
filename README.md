@@ -323,7 +323,9 @@ Currently Orchestra is optimized for **building new projects from scratch**. Run
 <details>
 <summary>Can I stop a run midway and resume it?</summary>
 
-You can stop any active run from the dashboard. The work done so far is saved to disk. Full resume (picking up exactly where it left off) is not yet supported — but the generated files are always there, so you can continue manually or start a new run that builds on what was generated.
+Yes — and it picks up exactly where it left off. When you click **Stop**, Orchestra saves the Claude session ID. When you click **Continue**, it uses the Claude Agent SDK's built-in session resume to restore the full conversation context: which agents ran, what code was written, where the pipeline was. Claude doesn't start over — it continues from that exact point.
+
+Note: the **Continue** button appears after the run ends (completed, failed, or stopped). There is no mid-run pause — Stop is immediate.
 
 </details>
 
