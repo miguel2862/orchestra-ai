@@ -50,7 +50,16 @@ export async function startServer(
   const app = express();
   const server = createServer(app);
 
-  app.use(cors());
+  app.use(cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, server-to-server) or from localhost
+      if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("CORS blocked"));
+      }
+    },
+  }));
   app.use(express.json({ limit: "10mb" }));
 
   // Clean up projects that were "running" when the server last stopped
@@ -102,11 +111,12 @@ export async function startServer(
       // Agent is running — stop it, then resume with the user's message
       await stopProject(msg.projectId);
       // Small delay to let the process terminate
-      setTimeout(() => {
-        continueProject(msg.projectId, msg.text).catch((err) =>
-          console.error("Failed to continue after intervention:", err),
-        );
-      }, 1000);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        await continueProject(msg.projectId, msg.text);
+      } catch (err) {
+        console.error("Failed to continue after intervention:", err);
+      }
     }
   });
 

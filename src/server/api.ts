@@ -31,7 +31,16 @@ export function setupApiRoutes(app: Express): void {
   app.patch("/api/config", (req, res) => {
     const config = loadConfig();
     if (!config) return res.status(400).json({ error: "No config found" });
-    const updated = { ...config, ...req.body };
+    const ALLOWED_KEYS = new Set([
+      "anthropicApiKey", "openaiApiKey", "model", "subagentModel",
+      "maxTurns", "maxBudgetUsd", "defaultWorkingDir", "mcpServers",
+      "githubToken",
+    ]);
+    const patch: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(req.body)) {
+      if (ALLOWED_KEYS.has(key)) patch[key] = value;
+    }
+    const updated = { ...config, ...patch };
     saveConfig(updated);
     res.json({ ok: true });
   });
@@ -83,8 +92,12 @@ export function setupApiRoutes(app: Express): void {
   });
 
   app.post("/api/projects/:id/stop", async (req, res) => {
-    await stopProject(req.params.id);
-    res.json({ ok: true });
+    try {
+      await stopProject(req.params.id);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
   });
 
   app.get("/api/projects/:id/events", async (req, res) => {

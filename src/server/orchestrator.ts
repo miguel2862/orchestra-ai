@@ -1,4 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage, SDKAssistantMessage, SDKSystemMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -7,12 +8,13 @@ import { loadConfig } from "./config.js";
 import { getTemplate } from "./templates.js";
 import { buildMcpServerConfig } from "./mcp.js";
 import { createProject, updateProject, appendProjectEvent } from "./project-store.js";
-import { initGitRepo } from "./git-manager.js";
+import { initGitRepo, commitTask } from "./git-manager.js";
 import { estimateCost } from "./cost-tracker.js";
 import { formatLessonsForPrompt, extractLessonsFromRun } from "./lessons.js";
 import type { ProjectConfig, Project, ModelId, AgentModelAlias, AgentRunStat } from "../shared/types.js";
 
 const activeProjects = new Map<string, { close: () => void }>();
+const pendingContinue = new Set<string>();
 
 // Broadcast + persist to event log (skips task_progress to avoid bloat)
 function emit(projectId: string, event: Parameters<typeof broadcast>[0]): void {
@@ -27,12 +29,12 @@ const DEFAULT_MODEL: ModelId = "claude-opus-4-6";
 
 function resolveModel(projectConfig: ProjectConfig, config: ReturnType<typeof loadConfig> & {}): ModelId {
   if (projectConfig.model === "auto") return config.model || DEFAULT_MODEL;
-  if (projectConfig.model && projectConfig.model !== "") return projectConfig.model as ModelId;
+  if (projectConfig.model) return projectConfig.model as ModelId;
   return config.model || DEFAULT_MODEL;
 }
 
 function resolveSubagentModel(projectConfig: ProjectConfig, config: ReturnType<typeof loadConfig> & {}): AgentModelAlias {
-  if (projectConfig.subagentModel && projectConfig.subagentModel !== "") return projectConfig.subagentModel as AgentModelAlias;
+  if (projectConfig.subagentModel) return projectConfig.subagentModel as AgentModelAlias;
   return config.subagentModel || "inherit";
 }
 
@@ -841,6 +843,19 @@ Perform a thorough code review of ALL project files. Fix critical and major issu
 - Frontend: check bundle size impact of imports (full lodash vs lodash/get)
 - Identify blocking operations in hot paths
 
+## CROSS-REFERENCE ANALYSIS (dead code audit)
+For every exported function, class, constant, and type — verify it is actually imported and used somewhere else in the project:
+- Functions defined but never called anywhere
+- Imports declared but never referenced in the file body
+- Variables/constants exported but never imported by any other file
+- React components defined but never rendered
+- API endpoints defined on the server but no client code calls them
+- Config fields declared in interfaces/types but never read or written
+- Event types emitted but never listened to (or vice versa)
+
+Use Grep to search for each symbol's name across all files before concluding it's dead.
+Dead code is MAJOR severity — it increases maintenance burden and causes confusion.
+
 ## FIXING RULES
 - Fix ALL BLOCKER and CRITICAL issues directly in source code
 - Fix MAJOR issues if the fix is straightforward (< 20 lines changed)
@@ -948,7 +963,8 @@ function detectQualityGate(retriedAgent: string, completionCount: Map<string, nu
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 export async function startProject(projectConfig: ProjectConfig): Promise<{ projectId: string }> {
-  const config = loadConfig()!;
+  const config = loadConfig();
+  if (!config) throw new Error("No config found. Complete setup first.");
   const projectId = crypto.randomUUID();
   const template = getTemplate(projectConfig.template);
 
@@ -1046,19 +1062,16 @@ async function runAgent(
     console.log(`[orchestrator] SDK query started for ${projectId}`);
 
     for await (const message of messages) {
-      // Handle result message (no "type" field in some SDK versions)
-      if (!("type" in message) || (message as any).type === "result") {
-        const result = message as any;
-        if ("result" in result || result.type === "result") {
-          await handleCompletion(projectId, result, startTime, totalCostUsd, numTurns, agentStats, projectConfig, agentMessages, completedLoops);
-          return;
-        }
-        continue;
+      // Handle result message
+      if ("type" in message && message.type === "result") {
+        await handleCompletion(projectId, message as SDKResultMessage, startTime, totalCostUsd, numTurns, agentStats, projectConfig, agentMessages, completedLoops);
+        return;
       }
+      if (!("type" in message)) continue;
 
-      switch ((message as any).type) {
+      switch (message.type) {
         case "system": {
-          const sys = message as any;
+          const sys = message as SDKSystemMessage;
           if (sys.subtype === "init") {
             await updateProject(projectId, { sessionId: sys.session_id });
             emit(projectId, { type: "project_started", projectId, timestamp: Date.now(), data: { sessionId: sys.session_id } });
@@ -1067,7 +1080,7 @@ async function runAgent(
         }
 
         case "assistant": {
-          const ast = message as any;
+          const ast = message as SDKAssistantMessage;
           numTurns++;
           const isMainAgent = !ast.parent_tool_use_id;
 
@@ -1082,6 +1095,7 @@ async function runAgent(
               if (!agentStats[agent]) agentStats[agent] = { inputTokens: 0, outputTokens: 0, durationMs: 0 };
               agentStats[agent].durationMs = (agentStats[agent].durationMs || 0) + dur;
               emit(projectId, { type: "subagent_completed", projectId, timestamp: Date.now(), data: { agent, taskId, success: true, durationMs: dur } });
+              if (projectConfig.gitEnabled) commitTask(projectConfig.workingDir, agent);
               // Track completion count for feedback loop detection
               agentCompletionCount.set(agent, (agentCompletionCount.get(agent) || 0) + 1);
               // Complete active feedback loop if any
@@ -1094,7 +1108,7 @@ async function runAgent(
             }
           }
 
-          const content = ast.message?.content || ast.content || [];
+          const content = ast.message?.content ?? [];
           for (const block of content) {
             if (block.type === "text" && block.text) {
               emit(projectId, { type: "agent_message", projectId, timestamp: Date.now(), data: { text: block.text, isSubagent: !isMainAgent } });
@@ -1111,7 +1125,7 @@ async function runAgent(
               }
 
               const file = block.input?.file_path || block.input?.pattern;
-              const actingAgent = !isMainAgent ? (taskIdToAgent.get(ast.parent_tool_use_id) || "unknown") : undefined;
+              const actingAgent = !isMainAgent && ast.parent_tool_use_id ? (taskIdToAgent.get(ast.parent_tool_use_id) || "unknown") : undefined;
 
               emit(projectId, { type: "task_progress", projectId, timestamp: Date.now(), data: { tool: block.name, file, detail: block.name === "Bash" ? block.input?.command?.slice(0, 80) : undefined, agent: actingAgent } });
 
@@ -1166,6 +1180,7 @@ async function runAgent(
               const taskSuccess = !block.is_error;
               activeTaskIds.delete(block.tool_use_id);
               emit(projectId, { type: "subagent_completed", projectId, timestamp: Date.now(), data: { agent, taskId: block.tool_use_id, success: taskSuccess } });
+              if (projectConfig.gitEnabled && taskSuccess) commitTask(projectConfig.workingDir, agent);
               // Track completion count for feedback loop detection
               agentCompletionCount.set(agent, (agentCompletionCount.get(agent) || 0) + 1);
               // Complete active feedback loop if any
@@ -1179,7 +1194,7 @@ async function runAgent(
           }
 
           // Track tokens
-          const usage = ast.message?.usage || ast.usage;
+          const usage = ast.message?.usage;
           if (usage) {
             const cost = estimateCost(ast.message?.model || "claude-sonnet-4-6", usage);
             totalCostUsd += cost;
@@ -1201,12 +1216,6 @@ async function runAgent(
         }
       }
 
-      // Also check top-level result
-      if ("result" in (message as any) || (message as any).type === "result") {
-        const result = message as any;
-        await handleCompletion(projectId, result, startTime, totalCostUsd, numTurns, agentStats, projectConfig, agentMessages, completedLoops);
-        return;
-      }
     }
 
     // Loop ended without explicit result
@@ -1231,12 +1240,13 @@ async function runAgent(
   }
 }
 
-async function handleCompletion(projectId: string, result: any, startTime: number, totalCostUsd: number, numTurns: number, agentStats: Record<string, AgentRunStat>, projectConfig: ProjectConfig, agentMessages: Array<{ agent: string; text: string }> = [], completedLoops: Array<{ qualityGate: string; loopNumber: number; resolved: boolean }> = []) {
+async function handleCompletion(projectId: string, result: SDKResultMessage, startTime: number, totalCostUsd: number, numTurns: number, agentStats: Record<string, AgentRunStat>, projectConfig: ProjectConfig, agentMessages: Array<{ agent: string; text: string }> = [], completedLoops: Array<{ qualityGate: string; loopNumber: number; resolved: boolean }> = []) {
   const success = !result.is_error;
+  const resultText = "result" in result ? result.result : undefined;
   const stats = buildAgentStats(agentStats);
   const dur = Date.now() - startTime;
-  emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success, result: result.result, totalCostUsd, durationMs: dur, numTurns, agentStats: stats } });
-  await updateProject(projectId, { status: success ? "completed" : "failed", totalCostUsd, durationMs: dur, numTurns, result: result.result, agentStats: stats });
+  emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success, result: resultText, totalCostUsd, durationMs: dur, numTurns, agentStats: stats } });
+  await updateProject(projectId, { status: success ? "completed" : "failed", totalCostUsd, durationMs: dur, numTurns, result: resultText, agentStats: stats });
   try {
     saveRunMemory(projectConfig.workingDir, { projectId, projectName: projectConfig.name, stack: projectConfig.techStack, startedAt: new Date(startTime).toISOString(), completedAt: new Date().toISOString(), success, totalCostUsd, durationMs: dur, numTurns, agentStats: stats, decisions: [], feedbackLoops: completedLoops });
   } catch {}
@@ -1260,20 +1270,27 @@ export async function stopProject(projectId: string): Promise<void> {
 export function getActiveProjectIds(): string[] { return [...activeProjects.keys()]; }
 
 export async function continueProject(projectId: string, userMessage: string): Promise<void> {
-  const { getProject } = await import("./project-store.js");
-  const project = await getProject(projectId);
-  if (!project) throw new Error("Project not found");
-  if (!project.sessionId) throw new Error("No session to resume");
-  if (activeProjects.has(projectId)) throw new Error("Project is already running");
+  if (pendingContinue.has(projectId)) throw new Error("Continue already in progress for this project");
+  pendingContinue.add(projectId);
+  try {
+    const { getProject } = await import("./project-store.js");
+    const project = await getProject(projectId);
+    if (!project) throw new Error("Project not found");
+    if (!project.sessionId) throw new Error("No session to resume");
+    if (activeProjects.has(projectId)) throw new Error("Project is already running");
 
-  const config = loadConfig()!;
-  if (config.anthropicApiKey) process.env.ANTHROPIC_API_KEY = config.anthropicApiKey;
-  delete process.env.CLAUDECODE;
-  delete process.env.CLAUDE_CODE_ENTRYPOINT;
-  await updateProject(projectId, { status: "running" });
-  const mcpServers = buildMcpServerConfig(config.mcpServers, project.config.workingDir);
+    const config = loadConfig();
+    if (!config) throw new Error("No config found. Complete setup first.");
+    if (config.anthropicApiKey) process.env.ANTHROPIC_API_KEY = config.anthropicApiKey;
+    delete process.env.CLAUDECODE;
+    delete process.env.CLAUDE_CODE_ENTRYPOINT;
+    await updateProject(projectId, { status: "running" });
+    const mcpServers = buildMcpServerConfig(config.mcpServers, project.config.workingDir);
 
-  runResumedAgent(projectId, userMessage, project.sessionId, mcpServers, project.config, config);
+    runResumedAgent(projectId, userMessage, project.sessionId, mcpServers, project.config, config);
+  } finally {
+    pendingContinue.delete(projectId);
+  }
 }
 
 async function runResumedAgent(
@@ -1308,25 +1325,27 @@ async function runResumedAgent(
     emit(projectId, { type: "project_started", projectId, timestamp: Date.now(), data: { sessionId } });
 
     for await (const message of messages) {
-      if ("type" in message && (message as any).type === "assistant") {
-        const ast = message as any;
+      if ("type" in message && message.type === "result") {
+        const result = message as SDKResultMessage;
+        const resultText = "result" in result ? result.result : undefined;
+        emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success: !result.is_error, result: resultText, totalCostUsd, durationMs: Date.now() - startTime, numTurns } });
+        await updateProject(projectId, { status: !result.is_error ? "completed" : "failed", totalCostUsd, durationMs: Date.now() - startTime, numTurns });
+        continue;
+      }
+      if ("type" in message && message.type === "assistant") {
+        const ast = message as SDKAssistantMessage;
         numTurns++;
-        const content = ast.message?.content || ast.content || [];
+        const content = ast.message?.content ?? [];
         for (const block of content) {
           if (block.type === "text" && block.text) emit(projectId, { type: "agent_message", projectId, timestamp: Date.now(), data: { text: block.text, isSubagent: false } });
           if (block.type === "tool_use") emit(projectId, { type: "task_progress", projectId, timestamp: Date.now(), data: { tool: block.name, file: block.input?.file_path || block.input?.pattern } });
         }
-        const usage = ast.message?.usage || ast.usage;
+        const usage = ast.message?.usage;
         if (usage) {
           const cost = estimateCost(ast.message?.model || "claude-sonnet-4-6", usage);
           totalCostUsd += cost; totalInputTokens += usage.input_tokens || 0; totalOutputTokens += usage.output_tokens || 0;
           emit(projectId, { type: "cost_update", projectId, timestamp: Date.now(), data: { totalCostUsd, inputTokens: totalInputTokens, outputTokens: totalOutputTokens } });
         }
-      }
-      if ("result" in (message as any)) {
-        const result = message as any;
-        emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success: !result.is_error, result: result.result, totalCostUsd, durationMs: Date.now() - startTime, numTurns } });
-        await updateProject(projectId, { status: !result.is_error ? "completed" : "failed", totalCostUsd, durationMs: Date.now() - startTime, numTurns });
       }
     }
 

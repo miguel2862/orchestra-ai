@@ -8,7 +8,7 @@ let interventionHandler: ((msg: InterventionMessage) => void) | null = null;
 export function setupWebSocket(server: Server): WebSocketServer {
   wss = new WebSocketServer({ server, path: "/ws" });
   wss.on("connection", (ws) => {
-    ws.on("message", (raw) => {
+    const messageHandler = (raw: Buffer) => {
       try {
         const msg = JSON.parse(String(raw));
         if (msg.type === "intervention" && interventionHandler) {
@@ -17,7 +17,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
       } catch {
         // ignore malformed
       }
-    });
+    };
+    ws.on("message", messageHandler);
+    ws.on("close", () => ws.off("message", messageHandler));
   });
   return wss;
 }

@@ -27,8 +27,8 @@ export function commitTask(cwd: string, taskName: string): void {
   if (!isGitAvailable()) return;
   try {
     execSync("git add -A", { cwd, stdio: "ignore" });
-    const msg = taskName.replace(/"/g, '\\"');
-    execSync(`git commit -m "Complete: ${msg}" --allow-empty`, {
+    const msg = `Complete: ${taskName}`;
+    execSync("git commit -m " + JSON.stringify(msg) + " --allow-empty", {
       cwd,
       stdio: "ignore",
     });

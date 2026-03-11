@@ -15,7 +15,7 @@ export default function NewProject() {
     queryFn: () => api.getConfig(),
   });
 
-  const defaultDir = (config?.defaultWorkingDir as string) ?? "";
+  const defaultDir = config?.defaultWorkingDir ?? "";
 
   const [form, setForm] = useState({
     name: "",
@@ -26,11 +26,11 @@ export default function NewProject() {
     workingDir: "",
     gitEnabled: true,
     pushToGithub: false,
-    model: "claude-opus-4-6" as string,
-    subagentModel: "sonnet" as string,
+    model: "" as string,
+    subagentModel: "" as string,
   });
 
-  const hasGithubToken = !!(config?.githubToken as string);
+  const hasGithubToken = !!config?.githubToken;
 
   const set = (key: string, value: string | boolean) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -212,7 +212,7 @@ export default function NewProject() {
             </div>
             <div className="text-neutral-600">Pipeline: Architect → Developer → [DB] → Error Checker + Security → Tester → Reviewer → Deployer</div>
             <div className="text-neutral-600">Database &amp; Security agents activate automatically based on project needs</div>
-            <div className="text-neutral-600">Max turns: <span className="text-neutral-500">{(config?.maxTurns as number) ?? 100}</span> · Budget: <span className="text-neutral-500">${(config?.maxBudgetUsd as number) ?? 10}</span></div>
+            <div className="text-neutral-600">Max turns: <span className="text-neutral-500">{config?.maxTurns ?? 100}</span> · Budget: <span className="text-neutral-500">${config?.maxBudgetUsd ?? 10}</span></div>
           </div>
         </div>
 

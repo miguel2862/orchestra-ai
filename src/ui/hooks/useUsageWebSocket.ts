@@ -16,6 +16,7 @@ export interface LiveUsageData {
 export function useUsageWebSocket() {
   const queryClient = useQueryClient();
   const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [live, setLive] = useState<LiveUsageData | null>(null);
 
   const connect = useCallback(() => {
@@ -37,14 +38,14 @@ export function useUsageWebSocket() {
     };
 
     ws.onclose = () => {
-      // Reconnect after 3s
-      setTimeout(connect, 3000);
+      reconnectTimer.current = setTimeout(connect, 3000);
     };
   }, [queryClient]);
 
   useEffect(() => {
     connect();
     return () => {
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       wsRef.current?.close();
     };
   }, [connect]);

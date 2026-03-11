@@ -29,7 +29,7 @@ const statusIcon: Record<string, React.ReactNode> = {
 };
 
 export default function History() {
-  const { data: rawProjects, refetch } = useProjects();
+  const { data: rawProjects } = useProjects();
   const projects = (rawProjects ?? []) as Project[];
   const queryClient = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
@@ -39,7 +39,6 @@ export default function History() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       setConfirmDelete(null);
-      refetch();
     },
   });
 

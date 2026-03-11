@@ -1,3 +1,5 @@
+import type { Project, OrchestraConfig } from "@shared/types";
+
 const BASE = "/api";
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -12,13 +14,19 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/** Config as returned by GET /api/config (API keys are masked) */
+export type MaskedConfig = Omit<OrchestraConfig, "anthropicApiKey"> & {
+  anthropicApiKey: string;
+  hasApiKey: boolean;
+};
+
 export const api = {
-  getConfig: () => request<Record<string, unknown>>("/config"),
-  updateConfig: (data: Record<string, unknown>) =>
+  getConfig: () => request<MaskedConfig>("/config"),
+  updateConfig: (data: Partial<OrchestraConfig>) =>
     request("/config", { method: "PATCH", body: JSON.stringify(data) }),
 
-  listProjects: () => request<unknown[]>("/projects"),
-  getProject: (id: string) => request<unknown>(`/projects/${id}`),
+  listProjects: () => request<Project[]>("/projects"),
+  getProject: (id: string) => request<Project>(`/projects/${id}`),
   createProject: (data: Record<string, unknown>) =>
     request<{ projectId: string }>("/projects", {
       method: "POST",

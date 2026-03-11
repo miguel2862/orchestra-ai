@@ -1,4 +1,5 @@
 import { useMemo, useEffect, useState, useRef } from "react";
+import type { OrchestraEvent } from "@shared/types";
 
 type AgentStatus = "idle" | "active" | "completed" | "failed";
 type ProjectStatus = "running" | "completed" | "failed" | "stopped";
@@ -21,7 +22,7 @@ interface FeedbackLoop {
 }
 
 interface AgentPipelineProps {
-  events: any[];
+  events: OrchestraEvent[];
   status: ProjectStatus;
 }
 
@@ -337,7 +338,7 @@ function AgentCard({ agent, state, isHub = false }: { agent: AgentDef; state: Ag
           transition: "color 0.4s ease", textAlign: "center", lineHeight: 1.2 }}>
           {agent.name}
         </div>
-        <div style={{ fontSize: 7.5, color: "rgba(255,255,255,0.22)", textAlign: "center", lineHeight: 1.1 }}>{(agent as any).role}</div>
+        <div style={{ fontSize: 7.5, color: "rgba(255,255,255,0.22)", textAlign: "center", lineHeight: 1.1 }}>{agent.role}</div>
 
         {/* Retry badge */}
         {state.retryCount > 0 && (
@@ -405,7 +406,9 @@ export default function AgentPipeline({ events, status }: AgentPipelineProps) {
           if (event.data.agent && event.data.agent !== "unknown") {
             const state = states.get(event.data.agent);
             if (state?.status === "active") {
-              states.set(event.data.agent, { ...state, currentAction: label, recentActions: [...state.recentActions, actionStr].slice(-5) });
+              state.currentAction = label;
+              state.recentActions.push(actionStr);
+              if (state.recentActions.length > 5) state.recentActions.shift();
             }
           }
         }
