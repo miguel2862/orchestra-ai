@@ -19,12 +19,12 @@ export async function runSetup(): Promise<void> {
     "  Let's configure your orchestrator.\n"
   );
 
-  // 1. Anthropic API key (optional if using Claude Max subscription)
+  // 1. Anthropic API key (optional if using Claude Pro/Max subscription)
   const authMethod = await select({
     message: "How do you authenticate with Claude?",
     choices: [
       {
-        name: "Claude Max subscription (already logged into Claude Code)",
+        name: "Claude subscription (Pro/Max — already logged into Claude Code)",
         value: "oauth" as const,
       },
       {
@@ -43,22 +43,26 @@ export async function runSetup(): Promise<void> {
     });
   } else {
     console.log(
-      chalk.dim("  Using Claude Code OAuth. Make sure you're logged in (claude /login).\n")
+      chalk.dim("  Using Claude Code OAuth. Make sure you're logged in (claude login).\n")
     );
   }
 
-  // 2. OpenAI API key (optional)
-  const wantsOpenAI = await confirm({
-    message: "Do you have an OpenAI API key? (optional, for future use)",
+  // 2. GitHub token (optional — enables push to GitHub at end of projects)
+  const wantsGitHub = await confirm({
+    message: "Add a GitHub token? (optional — lets agents push code to GitHub repos)",
     default: false,
   });
 
-  let openaiApiKey: string | undefined;
-  if (wantsOpenAI) {
-    openaiApiKey = await input({
-      message: "OpenAI API key:",
+  let githubToken: string | undefined;
+  if (wantsGitHub) {
+    console.log(chalk.dim("  Get a token at: https://github.com/settings/tokens"));
+    console.log(chalk.dim("  Required scopes: repo, workflow\n"));
+    githubToken = await input({
+      message: "GitHub Personal Access Token (ghp_...):",
       validate: (val) =>
-        val.startsWith("sk-") ? true : "Must start with sk-",
+        val.startsWith("ghp_") || val.startsWith("github_pat_")
+          ? true
+          : "Must start with ghp_ or github_pat_",
     });
   }
 
@@ -69,9 +73,9 @@ export async function runSetup(): Promise<void> {
     default: defaultDir,
   });
 
-  // 4. Git
+  // 4. Git auto-commits
   const gitEnabled = await confirm({
-    message: "Enable git auto-commits? (optional, can change later)",
+    message: "Enable git auto-commits during builds? (optional, can change later)",
     default: false,
   });
 
@@ -104,7 +108,7 @@ export async function runSetup(): Promise<void> {
   // Save config
   const config: OrchestraConfig = {
     anthropicApiKey,
-    openaiApiKey,
+    githubToken,
     defaultWorkingDir: workingDir,
     mcpServers: getDefaultMcpServers(),
     setupComplete: true,
