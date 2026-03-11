@@ -18,6 +18,10 @@
 
 [📦 npm package](https://www.npmjs.com/package/orchestra-ai-app) · [🐛 Issues](https://github.com/miguel2862/orchestra-ai/issues) · [🤖 Powered by Claude Agent SDK](https://github.com/anthropics/claude-code)
 
+<br/>
+
+![Agent Pipeline with active feedback loop](assets/screenshots/pipeline-feedback.jpeg)
+
 </div>
 
 ---
@@ -136,6 +140,7 @@ When a quality agent finds a problem, it sends Developer a structured report —
 
 After running `orchestra-ai`, your browser opens automatically. You get a real-time view of everything happening:
 
+
 | Feature | What you see |
 |---------|-------------|
 | **Hub-and-spoke visualization** | The star topology rendered live — agents light up as they activate |
@@ -170,6 +175,10 @@ The `.orchestra/` folder is how Orchestra remembers what it built — if you con
 ---
 
 ## 🚀 Quick Start
+
+| | |
+|---|---|
+| ![New Project — describe your idea](assets/screenshots/new-project.jpeg) | ![Agent configuration and model selection](assets/screenshots/new-project-model.jpeg) |
 
 ### macOS / Linux
 
@@ -232,6 +241,8 @@ Get yours at [console.anthropic.com](https://console.anthropic.com) and paste it
 ---
 
 ## 💰 Cost
+
+![Claude usage panel — session and weekly limits live](assets/screenshots/usage.jpeg)
 
 ### With a Claude subscription
 **No extra token cost.** Usage counts against your plan's session and weekly limits. The dashboard shows both live.
