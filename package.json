@@ -1,6 +1,6 @@
 {
   "name": "orchestra-ai-app",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "AI-powered multi-agent project orchestrator with web UI. One command to build anything.",
   "type": "module",
   "bin": {
