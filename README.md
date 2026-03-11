@@ -66,10 +66,10 @@ flowchart TD
     TEST["🧪 Tester\nUnit & integration tests"]
     REV["👁️ Reviewer\nCode quality & patterns"]
 
-    EC -.->|"❌ issues found — retry × 2"| DEV
-    SEC -.->|"❌ CVE found — retry × 1"| DEV
-    TEST -.->|"❌ tests fail — retry × 2"| DEV
-    REV -.->|"❌ critical issues — retry × 1"| DEV
+    EC -.->|"❌ issues found — retry × 3"| DEV
+    SEC -.->|"❌ CVE found — retry × 2"| DEV
+    TEST -.->|"❌ tests fail — retry × 3"| DEV
+    REV -.->|"❌ critical issues — retry × 2"| DEV
 
     EC --> DEPLOY
     SEC --> DEPLOY
@@ -77,7 +77,7 @@ flowchart TD
     REV --> DEPLOY
 
     DEPLOY["🚀 Deployer\nStarts & verifies the app"]
-    DEPLOY -.->|"❌ won't start — retry × 1"| DEV
+    DEPLOY -.->|"❌ won't start — retry × 2"| DEV
     DEPLOY --> DONE(["✅ Your app is live"])
 
     style DEV fill:#4c1d95,color:#e9d5ff,stroke:#7c3aed,stroke-width:3px
@@ -120,11 +120,11 @@ When a quality agent finds a problem, it sends Developer a structured report —
 
 | Quality gate | Triggers when… | Max retries |
 |---|---|:---:|
-| 🔍 **Error Checker** | TypeScript errors, syntax errors, runtime exceptions | **2** |
-| 🧪 **Tester** | Any unit or integration test is failing | **2** |
-| 🔒 **Security** | A critical vulnerability is detected | **1** |
-| 👁️ **Reviewer** | A critical code quality issue is flagged | **1** |
-| 🚀 **Deployer** | The app fails to start or endpoints don't respond | **1** |
+| 🔍 **Error Checker** | TypeScript errors, syntax errors, runtime exceptions | **3** |
+| 🧪 **Tester** | Any unit or integration test is failing | **3** |
+| 🔒 **Security** | A critical vulnerability is detected | **2** |
+| 👁️ **Reviewer** | A critical code quality issue is flagged | **2** |
+| 🚀 **Deployer** | The app fails to start or endpoints don't respond | **2** |
 
 **When retries are exhausted:** if issues remain after the last retry, the pipeline continues to the next phase rather than stopping the entire build. The unresolved issues are recorded in the run log (`.orchestra/run_*.json` inside the project folder) so you can review exactly what was found and what couldn't be fully resolved.
 

@@ -745,21 +745,21 @@ AFTER Error Checker completes → Check its QUALITY GATE signal:
 - "QUALITY GATE: FAIL — [issues]":
   → Announce: "FEEDBACK LOOP 1: Routing from error_checker back to developer because: [issues]"
   → Task(subagent_type="developer", prompt="FEEDBACK LOOP: error_checker found issues. ISSUES: [paste]. Fix these in source files. Targeted fixes only.")
-  → Re-run Task(subagent_type="error_checker", ...) to verify. Max 2 retry loops.
+  → Re-run Task(subagent_type="error_checker", ...) to verify. Max 3 retry loops.
 - "QUALITY GATE: PASS": proceed immediately to Tester.
 
 AFTER Tester completes → Check its QUALITY GATE signal:
 - "QUALITY GATE: FAIL — [failing tests]":
   → Announce: "FEEDBACK LOOP 1: Routing from tester back to developer because: [failing tests]"
   → Task(subagent_type="developer", prompt="FEEDBACK LOOP: tester found failures. FAILURES: [paste]. Fix the code or tests.")
-  → Re-run Task(subagent_type="tester", ...) to verify. Max 2 retry loops.
+  → Re-run Task(subagent_type="tester", ...) to verify. Max 3 retry loops.
 - "QUALITY GATE: PASS": proceed immediately to Reviewer.
 
 AFTER Reviewer completes → Check its QUALITY GATE signal:
 - "QUALITY GATE: FAIL — [critical issues]":
   → Announce: "FEEDBACK LOOP 1: Routing from reviewer back to developer because: [critical issues]"
   → Task(subagent_type="developer", prompt="FEEDBACK LOOP: reviewer found critical issues. ISSUES: [paste]. Fix only the critical ones.")
-  → Do NOT re-run reviewer. Max 1 retry.
+  → Do NOT re-run reviewer. Max 2 retries.
 - "QUALITY GATE: PASS": proceed immediately to Deployer.
 
 AFTER Deployer completes → Check its QUALITY GATE signal:
@@ -767,7 +767,7 @@ AFTER Deployer completes → Check its QUALITY GATE signal:
   → Announce: "FEEDBACK LOOP 1: Routing from deployer back to error_checker because: app fails to start"
   → Task(subagent_type="error_checker", prompt="FEEDBACK LOOP: deployer found app doesn't start. Diagnose and fix.")
   → Then Task(subagent_type="developer", ...) if error_checker finds code issues
-  → Re-verify: start app, curl main URL. Max 1 retry loop.
+  → Re-verify: start app, curl main URL. Max 2 retry loops.
 - "QUALITY GATE: PASS": project complete.
 
 ### Loop Announcement Format (follow exactly):
@@ -781,7 +781,7 @@ After loop: "FEEDBACK LOOP [N] COMPLETE: [resolved/partially resolved/unresolved
 4. Pass full context in every agent's prompt (what previous agents produced)
 5. Use TodoWrite to track progress including retry loops
 6. Work autonomously — never ask questions
-7. Max retries: 2 for error_checker/tester gates, 1 for reviewer/deployer gates
+7. Max retries: 3 for error_checker/tester gates, 2 for reviewer/deployer gates
 8. End result must be WORKING, RUNNABLE code — use feedback loops to achieve this
 
 ## VALID subagent_type VALUES
@@ -844,7 +844,7 @@ ${usesDB ? "7" : "6"}. Task(subagent_type="deployer", ...)
 
 After each quality gate (Error Checker, Tester, Reviewer, Deployer), READ their output.
 If they found unresolved issues → route back to Developer to fix → re-verify.
-Max 2 retries per gate. The goal is WORKING code, not just "all agents ran."
+Max 3 retries per gate. The goal is WORKING code, not just "all agents ran."
 Announce each loop: "FEEDBACK LOOP [N]: Routing from [agent] back to [agent] because: [reason]"
 
 Do NOT write any code yourself. Start with Phase 1 now.`;
