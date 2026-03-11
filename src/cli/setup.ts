@@ -184,16 +184,17 @@ export async function runSetup(): Promise<void> {
     playwrightSpinner.warn("Playwright install skipped (will auto-install on first use)");
   }
 
-  // 8. Gemini API key (optional — free, for image generation)
+  // 8. Gemini API key (optional — on-demand image generation)
   const wantsGemini = await confirm({
-    message: "Connect Google Gemini? (free — enables AI image generation for projects)",
+    message: "Connect Google Gemini? (optional — enables on-demand AI image generation for projects)",
     default: true,
   });
 
   let geminiApiKey: string | undefined;
   if (wantsGemini) {
-    console.log(chalk.dim("  Get a free API key at: https://aistudio.google.com"));
-    console.log(chalk.dim("  Sign in with your Google account → Create API key → Copy it\n"));
+    console.log(chalk.dim("  Get an API key at: https://aistudio.google.com"));
+    console.log(chalk.dim("  Sign in with your Google account → Create API key → Copy it"));
+    console.log(chalk.dim("  Image-generation models can require billing or paid quota depending on Google's current offering.\n"));
     await openExternalUrl("https://aistudio.google.com/apikey");
 
     geminiApiKey = await input({
@@ -204,7 +205,7 @@ export async function runSetup(): Promise<void> {
       },
     });
     if (geminiApiKey) {
-      console.log(chalk.green("  ✓ Gemini connected — free image generation enabled\n"));
+      console.log(chalk.green("  ✓ Gemini connected — on-demand image generation available\n"));
     } else {
       geminiApiKey = undefined;
       console.log(chalk.dim("  Skipped — you can add it later in Settings\n"));
@@ -308,12 +309,13 @@ export async function runPostUpdateSetup(existingConfig: OrchestraConfig): Promi
     // Gemini API key
     if (!existingConfig.geminiApiKey) {
       const wantsGemini = await confirm({
-        message: "Connect Google Gemini? (free — enables AI image generation)",
+        message: "Connect Google Gemini? (optional — enables on-demand AI image generation)",
         default: true,
       });
 
       if (wantsGemini) {
-        console.log(chalk.dim("  Get a free key at: https://aistudio.google.com\n"));
+        console.log(chalk.dim("  Get an API key at: https://aistudio.google.com"));
+        console.log(chalk.dim("  Image-generation models can require billing or paid quota depending on Google's current offering.\n"));
         await openExternalUrl("https://aistudio.google.com/apikey");
 
         const key = await input({

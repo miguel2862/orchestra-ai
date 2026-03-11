@@ -72,10 +72,11 @@ function printGeminiHelp(): void {
   console.log([
     "Gemini commands:",
     "  orchestra-ai gemini-status [--json]",
-    "  orchestra-ai gemini-image --prompt \"Describe the image\" --output assets/generated/example.png [--aspect-ratio 16:9] [--json]",
+    "  orchestra-ai gemini-image --prompt \"Describe the image\" --output assets/generated/example.png [--aspect-ratio 16:9] [--json] [--soft-fail]",
     "",
     "Notes:",
     "  - Gemini image generation is optional and only works when geminiApiKey is configured.",
+    "  - Current Gemini image models may require billing or paid quota; do not assume they are free-tier.",
     "  - Supported aspect ratios: 1:1, 3:4, 4:3, 9:16, 16:9",
     "  - Use --soft-fail for optional generation inside agent workflows so quota or API issues do not stop the task.",
   ].join("\n"));

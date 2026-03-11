@@ -51,7 +51,7 @@ export type AgentId =
 export interface OrchestraConfig {
   anthropicApiKey: string;
   githubToken?: string;          // optional — for GitHub integration
-  geminiApiKey?: string;         // optional — for image generation (free tier)
+  geminiApiKey?: string;         // optional — for on-demand image generation
   defaultWorkingDir: string;
   mcpServers: McpServerEntry[];
   setupComplete: boolean;

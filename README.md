@@ -472,7 +472,7 @@ Everything is configurable from the **Settings** page in the web UI. Global conf
 |---------|-------------|
 | Anthropic API key | For API key auth |
 | GitHub token | Lets deploy flows create repos and push code |
-| Gemini API key | Optional key for on-demand AI asset generation when a project truly needs custom imagery |
+| Gemini API key | Optional key for on-demand AI asset generation when a project truly needs custom imagery; current image models can require billing/paid quota |
 | Default projects folder | Where new projects are created |
 | Main model | Latest aliases or pinned snapshots |
 | Subagent model | Use a cheaper model for specialized gates |
@@ -576,7 +576,7 @@ The visual gate is blocking:
 <details>
 <summary>Can Orchestra use Gemini to create project images?</summary>
 
-Yes, but it is intentionally **on-demand**, not automatic decoration. When a Gemini API key is configured, the Developer agent can call Orchestra CLI commands to create a small number of project-specific assets such as:
+Yes, but it is intentionally **on-demand**, not automatic decoration. When a Gemini API key is configured, the Developer agent can call Orchestra CLI commands to create a small number of project-specific assets. Note that current Gemini image models can require billing or paid quota, so do not assume image generation is free-tier. Typical uses include:
 
 - before / after scene comparisons
 - hero illustrations tied to the actual product concept

@@ -101,13 +101,13 @@ export default function Settings() {
             )}
           </Field>
 
-          <Field label="Gemini API Key (optional — free)" helpTip="Free API key from Google AI Studio (aistudio.google.com). Enables AI image generation for project assets (icons, backgrounds, illustrations). The free tier is permanent and generous — no credit card required.">
+          <Field label="Gemini API Key (optional)" helpTip="Google AI Studio key for optional on-demand image generation. Gemini image models can require billing or paid quota depending on the current Google offering, so do not assume image generation is free-tier.">
             <input
               type="password"
               value={secrets.geminiApiKey}
               onChange={(e) => setSecret("geminiApiKey", e.target.value)}
               className="input"
-              placeholder={config?.geminiApiKey ? `${config.geminiApiKey} (saved - type to replace)` : "AIza... (free at aistudio.google.com)"}
+              placeholder={config?.geminiApiKey ? `${config.geminiApiKey} (saved - type to replace)` : "AIza... (from aistudio.google.com)"}
             />
             {config?.geminiApiKey && (
               <p className="text-xs text-neutral-500 mt-1">
