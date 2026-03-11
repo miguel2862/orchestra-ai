@@ -49,8 +49,9 @@ export default function Dashboard() {
       // While running, send via WebSocket (intervention)
       sendIntervention(text);
     } else if (isDone && project?.sessionId) {
-      // After completion, resume session with new prompt
-      continueMutation.mutate(text);
+      // After completion, resume session — always route through agents, never fix directly
+      const wrappedPrompt = `User feedback on the project: ${text}\n\nIMPORTANT: You are the orchestrator. NEVER write or edit code yourself. Always delegate fixes via Task(subagent_type="developer", ...). After developer fixes, re-run the relevant quality gate agent(s) to verify. Follow the same pipeline rules as the original run.`;
+      continueMutation.mutate(wrappedPrompt);
     }
   };
 
@@ -108,7 +109,7 @@ export default function Dashboard() {
           <div className="flex gap-2">
             {isDone && project.sessionId && (
               <button
-                onClick={() => continueMutation.mutate("Continue building. Pick up where you left off and implement the remaining parts.")}
+                onClick={() => continueMutation.mutate("Continue building. Pick up where you left off and implement the remaining parts. IMPORTANT: You are the orchestrator — NEVER write code yourself, always delegate via Task(subagent_type=...). Follow the same pipeline rules as the original run.")}
                 disabled={continueMutation.isPending}
                 className="btn-primary flex items-center gap-1.5 disabled:opacity-50"
               >
