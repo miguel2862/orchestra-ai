@@ -759,7 +759,7 @@ AFTER Reviewer completes → Check its QUALITY GATE signal:
 - "QUALITY GATE: FAIL — [critical issues]":
   → Announce: "FEEDBACK LOOP 1: Routing from reviewer back to developer because: [critical issues]"
   → Task(subagent_type="developer", prompt="FEEDBACK LOOP: reviewer found critical issues. ISSUES: [paste]. Fix only the critical ones.")
-  → Do NOT re-run reviewer. Max 2 retries.
+  → Do NOT re-run reviewer. Max 3 retries.
 - "QUALITY GATE: PASS": proceed immediately to Deployer.
 
 AFTER Deployer completes → Check its QUALITY GATE signal:
@@ -781,7 +781,7 @@ After loop: "FEEDBACK LOOP [N] COMPLETE: [resolved/partially resolved/unresolved
 4. Pass full context in every agent's prompt (what previous agents produced)
 5. Use TodoWrite to track progress including retry loops
 6. Work autonomously — never ask questions
-7. Max retries: 3 for error_checker/tester gates, 2 for reviewer/deployer gates
+7. Max retries: 3 for error_checker/tester/reviewer gates, 2 for deployer gate
 8. End result must be WORKING, RUNNABLE code — use feedback loops to achieve this
 
 ## VALID subagent_type VALUES

@@ -69,7 +69,7 @@ flowchart TD
     EC -.->|"❌ issues found — retry × 3"| DEV
     SEC -.->|"❌ CVE found — retry × 2"| DEV
     TEST -.->|"❌ tests fail — retry × 3"| DEV
-    REV -.->|"❌ critical issues — retry × 2"| DEV
+    REV -.->|"❌ critical issues — retry × 3"| DEV
 
     EC --> DEPLOY
     SEC --> DEPLOY
@@ -123,7 +123,7 @@ When a quality agent finds a problem, it sends Developer a structured report —
 | 🔍 **Error Checker** | TypeScript errors, syntax errors, runtime exceptions | **3** |
 | 🧪 **Tester** | Any unit or integration test is failing | **3** |
 | 🔒 **Security** | A critical vulnerability is detected | **2** |
-| 👁️ **Reviewer** | A critical code quality issue is flagged | **2** |
+| 👁️ **Reviewer** | A critical code quality issue is flagged | **3** |
 | 🚀 **Deployer** | The app fails to start or endpoints don't respond | **2** |
 
 **When retries are exhausted:** if issues remain after the last retry, the pipeline continues to the next phase rather than stopping the entire build. The unresolved issues are recorded in the run log (`.orchestra/run_*.json` inside the project folder) so you can review exactly what was found and what couldn't be fully resolved.
@@ -354,6 +354,44 @@ Yes. The server tracks each run independently in memory and on disk. Start a sec
 <summary>Is my API key or GitHub token stored securely?</summary>
 
 Both are stored in `~/.orchestra-ai/config.json` on your local machine — they never leave your device except when making API calls directly to Anthropic or GitHub. Orchestra does not have a backend server; everything runs locally.
+
+</details>
+
+---
+
+## 🔧 Troubleshooting
+
+<details>
+<summary>Updating to a new version — "file already exists" error</summary>
+
+If you already have Orchestra installed and `npm install -g orchestra-ai-app` throws an `EEXIST` error, uninstall first:
+
+```bash
+npm uninstall -g orchestra-ai-app && npm install -g orchestra-ai-app
+```
+
+</details>
+
+<details>
+<summary>Command not found after install</summary>
+
+Make sure npm's global bin directory is in your `PATH`. Run `npm bin -g` to find it, then add it to your shell profile (`.zshrc`, `.bashrc`, etc.).
+
+On macOS with Homebrew-managed Node, the global bin is usually `/opt/homebrew/bin` — which is already in PATH by default.
+
+</details>
+
+<details>
+<summary>Browser doesn't open automatically</summary>
+
+Navigate manually to `http://localhost:3847` (or whatever port is shown in the terminal output). On Windows, `start` and `open` commands can sometimes be blocked by security policies.
+
+</details>
+
+<details>
+<summary>orchestra-ai hangs on startup</summary>
+
+Check that port 3847 (or whichever port it picked) isn't blocked by a firewall. Try stopping any other local servers and rerunning. You can also check the terminal for the exact port being used.
 
 </details>
 
