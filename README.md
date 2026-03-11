@@ -63,21 +63,24 @@ On first launch, a setup wizard runs automatically — it takes about 30 seconds
 
 ### Which Anthropic plan do I need?
 
-| Anthropic plan | Works with Orchestra? | How |
-|---|---|---|
-| **Claude Max** ($100 / $200 /mo) | ✅ Yes — no token costs | Includes Claude Code CLI with high usage limits |
-| **API key** (any plan, pay-as-you-go) | ✅ Yes — pay per token | Get a key at [console.anthropic.com](https://console.anthropic.com) |
-| **Claude Pro** ($20 /mo) | ❌ Not directly | Pro is for claude.ai web only — no Claude Code or API included. You can still get a separate API key at console.anthropic.com |
+| Plan | Monthly | Works with Orchestra? | Claude Code usage |
+|---|---|---|---|
+| **Claude Pro** | $20 | ✅ Yes | Included — lower usage limits |
+| **Claude Max 5x** | $100 | ✅ Yes | 5× more usage than Pro |
+| **Claude Max 20x** | $200 | ✅ Yes | 20× more usage than Pro |
+| **API key only** | Pay per token | ✅ Yes | Unlimited (billed per token) |
+
+> **Pro, Max 5x, and Max 20x all include Claude Code** in the same subscription. The difference is how many tokens you can use per session and per week before hitting the limit. For daily heavy coding use, Max is recommended.
 
 ---
 
-**Option A — Claude Max** *(no per-token costs, usage counts against your plan limits)*
+**Option A — Claude subscription (Pro or Max)** *(recommended — usage included in your plan)*
 ```bash
 npm install -g @anthropic-ai/claude-code
 claude login
 ```
 
-**Option B — Anthropic API key** *(pay per token, works with any account)*
+**Option B — Anthropic API key** *(pay per token — useful if you hit your plan limits or prefer direct billing)*
 Get yours at [console.anthropic.com](https://console.anthropic.com) and paste it during the setup wizard.
 
 ---
