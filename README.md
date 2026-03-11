@@ -25,7 +25,7 @@
 ## ⚡ Three steps. One running app.
 
 ```bash
-npm install -g orchestra-ai-app   # 1. install
+npm install -g orchestra-ai-app   # 1. install once
 orchestra-ai                       # 2. run
 # 3. describe your project in the browser — agents do the rest
 ```
@@ -86,7 +86,7 @@ flowchart TD
 ```
 
 > **Solid arrows** → forward pass (sequential phases).
-> **Dashed arrows** → feedback loops (automatic, only when issues are found).
+> **Dashed arrows** → feedback loops (automatic, only triggered when issues are found).
 
 ---
 
@@ -97,7 +97,7 @@ flowchart TD
 | 🧠 **Product Manager** | `0 · Plan` | Clarifies scope and writes a full Product Requirements Doc | Memory, Web Search |
 | 🏛️ **Architect** | `1 · Design` | Chooses tech stack, designs folder structure, plans APIs | Web Search, Memory |
 | 💻 **Developer** | `2 · Build ⭐` | **Writes all the code.** The hub — receives from Architect, routes feedback from all quality agents | Filesystem, Search, Memory |
-| 🗄️ **Database** | `2 · Build` | Designs schema, writes migrations, seeds (only when project needs a DB) | Filesystem, Postgres |
+| 🗄️ **Database** | `2 · Build` | Designs schema, writes migrations, seeds (only when the project needs a DB) | Filesystem, Postgres |
 | 🔍 **Error Checker** | `3 · Quality` | Scans for TypeScript errors, syntax bugs, missing imports, runtime crashes | Filesystem |
 | 🔒 **Security** | `3 · Quality` | Finds injection flaws, insecure auth, exposed secrets, known CVEs | Web Search, Filesystem |
 | 🧪 **Tester** | `3 · Quality` | Writes and runs unit & integration tests, reports coverage | Filesystem, Browser |
@@ -108,10 +108,9 @@ flowchart TD
 
 ---
 
-## 🔄 Automatic feedback loops — how retries work
+## 🔄 Automatic feedback loops
 
-When a quality agent finds a problem, it doesn't stop the build. It sends Developer a structured report:
-*what broke, where, why, and what to fix.* Developer fixes it. The quality agent re-checks.
+When a quality agent finds a problem, it sends Developer a structured report — *what broke, where, why, and what to fix.* Developer fixes it. The quality agent re-checks.
 
 ```
   Quality agent ──── ❌ issue report ────► Developer ──── fix ────► Quality agent re-checks
@@ -127,7 +126,9 @@ When a quality agent finds a problem, it doesn't stop the build. It sends Develo
 | 👁️ **Reviewer** | A critical code quality issue is flagged | **1** |
 | 🚀 **Deployer** | The app fails to start or endpoints don't respond | **1** |
 
-Once all quality gates pass (or retry limits are reached), the Deployer does a final launch. No manual intervention at any point.
+**When retries are exhausted:** if issues remain after the last retry, the pipeline continues to the next phase rather than stopping the entire build. The unresolved issues are recorded in the run log (`.orchestra/run_*.json` inside the project folder) so you can review exactly what was found and what couldn't be fully resolved.
+
+> **No manual intervention is needed at any point.** Even partial results are almost always a working base — usually a single targeted fix is all that's left.
 
 ---
 
@@ -144,7 +145,27 @@ After running `orchestra-ai`, your browser opens automatically. You get a real-t
 | **Result card** | Clickable `localhost` URL when your app is ready |
 | **History** | Every past run saved — browse previous projects and their full event logs |
 
-> Port defaults to **3847** but auto-reassigns if busy. You can run **multiple projects simultaneously** — each tracked independently.
+> Port defaults to **3847** but auto-reassigns if busy. You can **run multiple projects simultaneously** — each is tracked independently with its own event stream.
+
+---
+
+## 📁 What gets generated
+
+After a full run, your project folder looks like this:
+
+```
+my-project/
+├── src/                  # all source code written by Developer
+├── tests/                # test files written by Tester
+├── package.json
+├── README.md             # auto-generated project README
+├── .env.example          # environment variables template
+└── .orchestra/
+    ├── run_1712345678.json   # full run memory: cost, agent stats, issues found
+    └── profile.json          # aggregated stats across all runs on this project
+```
+
+The `.orchestra/` folder is how Orchestra remembers what it built — if you continue or modify the project later, agents can read prior run context.
 
 ---
 
@@ -250,7 +271,7 @@ Everything is configurable from the **Settings** page in the web UI. Config is s
 | GitHub token | Lets agents create repos and push code |
 | Default projects folder | Where new projects are created |
 | Main model | Opus 4.6 / Sonnet 4.6 / Haiku 4.5 |
-| Subagent model | Use a cheaper model for quality gates |
+| Subagent model | Use a cheaper model for quality gates to reduce cost |
 | Extended thinking | Deeper reasoning for complex projects |
 | Budget cap | Maximum USD spend per project |
 | Max turns | Hard limit on agent iterations |
@@ -287,6 +308,54 @@ Enable or disable each server from **Settings → MCP Servers**.
 | **Landing page** | Static site with modern design |
 | **CLI tool** | Node.js command-line utility |
 | **Custom** | Describe anything in plain English |
+
+---
+
+## ❓ Frequently asked
+
+<details>
+<summary>Does it work on existing projects or only new ones?</summary>
+
+Currently Orchestra is optimized for **building new projects from scratch**. Running it on an existing codebase is possible but the agents will treat the existing files as their starting context — results may vary. A "continue existing project" mode is on the roadmap.
+
+</details>
+
+<details>
+<summary>Can I stop a run midway and resume it?</summary>
+
+You can stop any active run from the dashboard. The work done so far is saved to disk. Full resume (picking up exactly where it left off) is not yet supported — but the generated files are always there, so you can continue manually or start a new run that builds on what was generated.
+
+</details>
+
+<details>
+<summary>What happens if Claude hits a rate limit mid-run?</summary>
+
+The Claude Agent SDK handles rate limit retries automatically with exponential backoff. If the limit is sustained (e.g., a weekly cap is reached), the active agent will fail and the run will report an error. Your generated files up to that point are preserved.
+
+</details>
+
+<details>
+<summary>Can I run multiple projects at the same time?</summary>
+
+Yes. The server tracks each run independently in memory and on disk. Start a second project from "New Project" while the first is running — both appear in the sidebar with their own live output streams. Keep in mind that parallel runs consume tokens in parallel, which hits subscription limits faster.
+
+</details>
+
+<details>
+<summary>Where are my projects and run history saved?</summary>
+
+- **Project files** → the working directory you chose during setup (default: `~/orchestra-projects/`)
+- **Run logs** → `~/.claude/projects/` — one JSON file and one JSONL event log per project
+- **Run memory** → inside each project at `.orchestra/run_*.json`
+
+</details>
+
+<details>
+<summary>Is my API key or GitHub token stored securely?</summary>
+
+Both are stored in `~/.orchestra-ai/config.json` on your local machine — they never leave your device except when making API calls directly to Anthropic or GitHub. Orchestra does not have a backend server; everything runs locally.
+
+</details>
 
 ---
 
