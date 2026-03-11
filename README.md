@@ -61,14 +61,24 @@ On first launch, a setup wizard runs automatically — it takes about 30 seconds
 | **Node.js** | v18 or higher — [download](https://nodejs.org) |
 | **Claude auth** | One of the two options below |
 
-**Option A — Claude Max subscription** *(recommended — no per-token API costs)*
+### Which Anthropic plan do I need?
+
+| Anthropic plan | Works with Orchestra? | How |
+|---|---|---|
+| **Claude Max** ($100 / $200 /mo) | ✅ Yes — no token costs | Includes Claude Code CLI with high usage limits |
+| **API key** (any plan, pay-as-you-go) | ✅ Yes — pay per token | Get a key at [console.anthropic.com](https://console.anthropic.com) |
+| **Claude Pro** ($20 /mo) | ❌ Not directly | Pro is for claude.ai web only — no Claude Code or API included. You can still get a separate API key at console.anthropic.com |
+
+---
+
+**Option A — Claude Max** *(no per-token costs, usage counts against your plan limits)*
 ```bash
 npm install -g @anthropic-ai/claude-code
 claude login
 ```
 
-**Option B — Anthropic API key** *(pay per token)*
-Get yours at [console.anthropic.com](https://console.anthropic.com) and paste it during setup.
+**Option B — Anthropic API key** *(pay per token, works with any account)*
+Get yours at [console.anthropic.com](https://console.anthropic.com) and paste it during the setup wizard.
 
 ---
 
