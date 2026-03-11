@@ -210,12 +210,13 @@ function ResultCard({ result }: { result: string }) {
         {urls.length > 0 && (
           <div className="flex items-center gap-2">
             {urls.map((url) => (
-              <a key={url} href={url} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-full"
-                style={{ background: "rgba(56,189,248,0.08)", border: "1px solid rgba(56,189,248,0.2)", color: "#38bdf8", textDecoration: "none" }}>
+              <button key={url}
+                onClick={() => window.open(url, "_blank")}
+                className="flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-full cursor-pointer"
+                style={{ background: "rgba(56,189,248,0.08)", border: "1px solid rgba(56,189,248,0.2)", color: "#38bdf8" }}>
                 <ExternalLink className="w-3 h-3" />
                 {url.replace(/https?:\/\//, "")}
-              </a>
+              </button>
             ))}
           </div>
         )}
@@ -223,11 +224,12 @@ function ResultCard({ result }: { result: string }) {
       <div className="text-sm text-neutral-300" style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
         {segments.map((seg, i) =>
           seg.isUrl ? (
-            <a key={i} href={seg.text} target="_blank" rel="noopener noreferrer"
-              className="font-mono text-sky-400 underline decoration-dotted hover:text-sky-300 transition-colors"
+            <button key={i}
+              onClick={() => window.open(seg.text, "_blank")}
+              className="font-mono text-sky-400 underline decoration-dotted hover:text-sky-300 transition-colors cursor-pointer bg-transparent border-0 p-0"
               style={{ fontSize: "0.8em" }}>
               {seg.text}
-            </a>
+            </button>
           ) : (
             <span key={i}>{seg.text}</span>
           )
