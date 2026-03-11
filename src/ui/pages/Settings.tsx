@@ -65,12 +65,13 @@ export default function Settings() {
             </div>
           </Field>
 
-          <Field label="OpenAI API Key (optional)" helpTip="Reserved for future use. Orchestra AI currently uses Claude Opus 4.6 as its primary model. OpenAI support may be added later.">
+          <Field label="Gemini API Key (optional — free)" helpTip="Free API key from Google AI Studio (aistudio.google.com). Enables AI image generation for project assets (icons, backgrounds, illustrations). The free tier is permanent and generous — no credit card required.">
             <input
               type="password"
-              value={(form.openaiApiKey as string) ?? ""}
-              onChange={(e) => set("openaiApiKey", e.target.value)}
+              value={(form.geminiApiKey as string) ?? ""}
+              onChange={(e) => set("geminiApiKey", e.target.value)}
               className="input"
+              placeholder="AIza... (free at aistudio.google.com)"
             />
           </Field>
 
@@ -170,7 +171,7 @@ export default function Settings() {
               </select>
             </Field>
 
-            <Field label="Subagent model" helpTip="The model used by the 8 subagents (architect, developer, database, security, error_checker, tester, reviewer, deployer). 'Inherit' uses the same model as the orchestrator. Choose a smaller model to conserve tokens — e.g., use Opus for the orchestrator and Sonnet for subagents.">
+            <Field label="Subagent model" helpTip="The model used by the 9 subagents (architect, developer, database, security, error_checker, tester, reviewer, deployer, visual_tester). 'Inherit' uses the same model as the orchestrator. Choose a smaller model to conserve tokens — e.g., use Opus for the orchestrator and Sonnet for subagents.">
               <select
                 value={(form.subagentModel as string) ?? "inherit"}
                 onChange={(e) => set("subagentModel", e.target.value)}

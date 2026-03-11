@@ -36,6 +36,7 @@ const AGENTS = [
   { id: "tester",          name: "Tester",      icon: "🧪",  role: "Tests & Coverage",color: "#14b8a6", bg: "rgba(20,184,166,0.08)"  },
   { id: "reviewer",        name: "Reviewer",    icon: "✨",  role: "Code Review",     color: "#10b981", bg: "rgba(16,185,129,0.08)"  },
   { id: "deployer",        name: "Deployer",    icon: "🚀",  role: "Docker & CI/CD",  color: "#38bdf8", bg: "rgba(56,189,248,0.08)"  },
+  { id: "visual_tester",   name: "Visual QA",   icon: "🖥",  role: "Browser Testing", color: "#06b6d4", bg: "rgba(6,182,212,0.08)"   },
 ] as const;
 
 type AgentDef = (typeof AGENTS)[number];
@@ -46,7 +47,7 @@ const CW = 560, CH = 440; // viewBox size (tighter)
 // Hub center
 const HUB = { x: 280, y: 220 };
 
-// Spoke positions — uniform ~175px radius around hub
+// Spoke positions — distributed around hub to fit 10 agents
 const POSITIONS: Record<string, { x: number; y: number }> = {
   product_manager: { x: 120, y: 82  }, // input chain: upper-left
   architect:       { x: 280, y: 52  }, // input chain: top
@@ -55,8 +56,9 @@ const POSITIONS: Record<string, { x: number; y: number }> = {
   error_checker:   { x: 464, y: 220 }, // 3 o'clock
   security:        { x: 428, y: 352 }, // 5 o'clock
   tester:          { x: 280, y: 390 }, // 6 o'clock
-  reviewer:        { x: 130, y: 352 }, // 8 o'clock
-  deployer:        { x: 94,  y: 220 }, // 9 o'clock
+  reviewer:        { x: 148, y: 390 }, // 7 o'clock
+  visual_tester:   { x: 60,  y: 310 }, // 8 o'clock
+  deployer:        { x: 94,  y: 188 }, // 9 o'clock
 };
 
 // Card sizes (slightly smaller for tighter fit)
@@ -77,10 +79,11 @@ const PIPELINE_EDGES: [string, string][] = [
   ["developer",       "tester"],
   ["developer",       "reviewer"],
   ["developer",       "deployer"],
+  ["developer",       "visual_tester"],
 ];
 
 // Quality gates that can feed back to developer
-const FEEDBACK_GATES = ["error_checker", "tester", "reviewer", "deployer"];
+const FEEDBACK_GATES = ["error_checker", "tester", "reviewer", "deployer", "visual_tester"];
 
 // ── Timer ─────────────────────────────────────────────────────
 function useElapsed(startedAt?: number, active?: boolean) {
@@ -108,7 +111,7 @@ function edgePoint(from: { x: number; y: number }, to: { x: number; y: number },
 
 // ── SVG connections ───────────────────────────────────────────
 // All quality gate spokes get bidirectional arrows (forward dispatch + return result)
-const QUALITY_GATES = new Set(["error_checker", "security", "tester", "reviewer", "deployer", "database"]);
+const QUALITY_GATES = new Set(["error_checker", "security", "tester", "reviewer", "deployer", "database", "visual_tester"]);
 
 function PipelineEdges({ states, feedbackLoops, isRunning }: { states: Map<string, AgentState>; feedbackLoops: FeedbackLoop[]; isRunning: boolean }) {
   const getStatus = (id: string) => states.get(id)?.status ?? "idle";

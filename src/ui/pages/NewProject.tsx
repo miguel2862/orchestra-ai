@@ -210,7 +210,7 @@ export default function NewProject() {
                 <span className="text-neutral-500">Claude Pro</span> → set both to <span className="text-neutral-400">Sonnet</span>
               </div>
             </div>
-            <div className="text-neutral-600">Pipeline: Architect → Developer → [DB] → Error Checker + Security → Tester → Reviewer → Deployer</div>
+            <div className="text-neutral-600">Pipeline: Architect → Developer → [DB] → Error Checker + Security → Tester → Reviewer → Deployer → Visual QA</div>
             <div className="text-neutral-600">Database &amp; Security agents activate automatically based on project needs</div>
             <div className="text-neutral-600">Max turns: <span className="text-neutral-500">{config?.maxTurns ?? 100}</span> · Budget: <span className="text-neutral-500">${config?.maxBudgetUsd ?? 10}</span></div>
           </div>

@@ -20,8 +20,8 @@ export function setupApiRoutes(app: Express): void {
       anthropicApiKey: hasApiKey
         ? "****" + config.anthropicApiKey!.slice(-4)
         : "",
-      openaiApiKey: config.openaiApiKey
-        ? "****" + config.openaiApiKey.slice(-4)
+      geminiApiKey: config.geminiApiKey
+        ? "****" + config.geminiApiKey.slice(-4)
         : "",
       /** true = using API key, false = using Claude Max subscription */
       hasApiKey,
@@ -32,7 +32,7 @@ export function setupApiRoutes(app: Express): void {
     const config = loadConfig();
     if (!config) return res.status(400).json({ error: "No config found" });
     const ALLOWED_KEYS = new Set([
-      "anthropicApiKey", "openaiApiKey", "model", "subagentModel",
+      "anthropicApiKey", "geminiApiKey", "model", "subagentModel",
       "maxTurns", "maxBudgetUsd", "defaultWorkingDir", "mcpServers",
       "githubToken",
     ]);
@@ -129,6 +129,12 @@ export function setupApiRoutes(app: Express): void {
   // ── Claude Usage ──
   app.get("/api/usage", (_req, res) => {
     res.json(getClaudeUsageStats());
+  });
+
+  // ── Gemini Usage ──
+  app.get("/api/gemini/usage", async (_req, res) => {
+    const { getGeminiUsage } = await import("./gemini.js");
+    res.json(getGeminiUsage());
   });
 
   // ── Subscription Usage (live from Anthropic API) ──

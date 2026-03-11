@@ -16,6 +16,7 @@ const AGENT_LABELS: Record<string, { label: string; color: string }> = {
   tester:          { label: "Tester",        color: "#14b8a6" },
   reviewer:        { label: "Reviewer",      color: "#10b981" },
   deployer:        { label: "Deployer",      color: "#38bdf8" },
+  visual_tester:   { label: "Visual QA",     color: "#06b6d4" },
   unknown:         { label: "Agent",         color: "#6b7280" },
 };
 

@@ -90,6 +90,12 @@ async function main(): Promise<void> {
   if (!isConfigComplete(config)) {
     const { runSetup } = await import("./setup.js");
     await runSetup();
+  } else {
+    // Check if app was updated with new features the user hasn't configured yet
+    const { CURRENT_CONFIG_VERSION, runPostUpdateSetup } = await import("./setup.js");
+    if ((config!.configVersion || 0) < CURRENT_CONFIG_VERSION) {
+      await runPostUpdateSetup(config!);
+    }
   }
 
   // Pre-flight: ensure Claude Code is ready or API key is set

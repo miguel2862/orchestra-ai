@@ -1,0 +1,69 @@
+Orchestra AI: El Director de Orquesta para Desarrollo de Software con IA
+
+¿Qué es Orchestra AI?
+
+Orchestra AI es una herramienta de línea de comandos que orquesta nueve agentes de inteligencia artificial especializados para construir proyectos de software completos. El usuario describe lo que quiere en lenguaje natural y Orchestra AI se encarga de todo el ciclo de desarrollo: desde la planificación del producto hasta el despliegue, pasando por el diseño de arquitectura, escritura de código, pruebas y revisión de seguridad.
+
+Lo que hace único a Orchestra AI es su topología en estrella con ciclos de retroalimentación automáticos. A diferencia de las herramientas que ejecutan agentes de IA en secuencia lineal, donde un fallo detiene todo el proceso, Orchestra AI coloca al agente Desarrollador en el centro como un hub, y los agentes de calidad se conectan como rayos de una estrella. Cuando un agente de calidad detecta un problema, automáticamente envía un reporte estructurado al Desarrollador, que corrige el error y vuelve a pasar la verificación. Este ciclo se repite hasta tres veces antes de continuar, logrando una tasa de éxito significativamente mayor que los pipelines lineales.
+
+El Problema que Resuelve
+
+Usar un solo agente de IA para construir software tiene limitaciones importantes: el agente intenta hacer todo, pierde contexto, comete errores que no detecta, y no tiene forma de verificar su propio trabajo. La alternativa de ejecutar múltiples agentes en secuencia es frágil porque cualquier fallo en un paso bloquea los siguientes.
+
+Orchestra AI resuelve esto con especialización y redundancia. Cada agente tiene un rol específico con instrucciones detalladas, herramientas apropiadas y criterios de éxito claros. Los agentes de calidad actúan como puertas de verificación independientes que pueden devolver trabajo al Desarrollador para corrección automática.
+
+Los Nueve Agentes
+
+Orchestra AI organiza sus agentes en cinco fases secuenciales:
+
+Fase cero es la planificación. El Product Manager recibe la descripción del usuario y produce un documento de requisitos del producto completo, incluyendo criterios de aceptación, alcance, restricciones y definición de terminado. Este documento guía a todos los demás agentes.
+
+Fase uno es el diseño. El Arquitecto lee el documento de requisitos y produce el diseño completo del sistema: estructura de archivos, contratos de API, modelos de datos, decisiones tecnológicas y diagramas de arquitectura. Todo queda documentado para que el Desarrollador tenga una guía clara.
+
+Fase dos es la construcción. El Desarrollador es el agente central que escribe todo el código del proyecto siguiendo la arquitectura definida. Tiene acceso al sistema de archivos para crear y editar archivos, puede ejecutar comandos en la terminal, y tiene acceso a búsqueda web para consultar documentación. Si el proyecto requiere base de datos, un agente de Base de Datos complementario genera los esquemas, migraciones y queries necesarios.
+
+Fase tres es la calidad, donde cuatro agentes trabajan en paralelo. El Verificador de Errores busca errores de TypeScript, sintaxis rota, imports faltantes y crashes en tiempo de ejecución. El agente de Seguridad analiza vulnerabilidades según los estándares OWASP y CVEs conocidos. El Tester escribe y ejecuta pruebas unitarias y de integración. El Revisor evalúa calidad de código, patrones de diseño y mantenibilidad.
+
+Cada uno de estos agentes de calidad produce un reporte estructurado con veredicto de aprobado o reprobado. Si reprueban, el reporte detallado se envía al Desarrollador para corrección. Este ciclo de retroalimentación se repite hasta tres veces por agente.
+
+Fase cuatro es el despliegue. El agente Deployer intenta iniciar la aplicación, verifica que los endpoints respondan correctamente, y reporta el resultado final con la URL donde la aplicación está corriendo.
+
+Arquitectura Técnica
+
+El backend está construido con Node.js, Express y TypeScript. Un servidor WebSocket transmite eventos en tiempo real al navegador. La interfaz de usuario está hecha con React 19, Vite, Tailwind CSS y TanStack Query para gestión de datos.
+
+El motor de orquestación utiliza el Claude Agent SDK de Anthropic, que permite crear agentes con herramientas reales mediante el Model Context Protocol. Cada agente tiene acceso a herramientas específicas: el sistema de archivos para leer y escribir código, terminal para ejecutar comandos, búsqueda web para consultar documentación, GitHub para crear repositorios, y un navegador automatizado para pruebas de interfaz.
+
+Toda la aplicación corre localmente en la máquina del usuario. No hay servidor en la nube, no hay sincronización externa. Las claves de API, tokens de GitHub y configuración se almacenan en una carpeta local. Los proyectos se guardan como archivos JSON con logs de eventos en formato JSONL para recuperación completa del historial.
+
+Experiencia del Usuario
+
+La instalación es un solo comando: npm install -g orchestra-ai-app. Al ejecutar orchestra-ai por primera vez, un asistente de configuración de treinta segundos guía al usuario para conectar su cuenta de Claude o ingresar una clave de API.
+
+Para crear un proyecto, el usuario abre el navegador donde aparece un formulario limpio. Escribe el nombre del proyecto, describe qué necesita construir, selecciona un template opcional como aplicación web full-stack, API backend, landing page o herramienta de línea de comandos, y opcionalmente configura el modelo de IA y presupuesto máximo.
+
+Al hacer clic en Iniciar, el navegador muestra un dashboard en tiempo real con una visualización de la topología en estrella. Los agentes se iluminan conforme se activan. Un stream de eventos muestra cada acción, decisión y resultado de cada agente. Un medidor de costo actualiza tokens y dólares gastados en tiempo real. Las flechas de retroalimentación se animan cuando los agentes de calidad envían trabajo de vuelta al Desarrollador.
+
+El usuario puede enviar mensajes de intervención a los agentes mientras trabajan, puede detener la ejecución en cualquier momento y reanudarla después sin perder contexto, y puede ejecutar múltiples proyectos simultáneamente.
+
+Cuando el proyecto termina, el dashboard muestra un resultado final con la URL de la aplicación corriendo y los archivos generados en el directorio del proyecto.
+
+Características Distintivas
+
+La primera es la resiliencia del sistema. Los pipelines lineales fallan catastróficamente cuando un paso tiene problemas. La topología en estrella de Orchestra AI permite que los fallos se corrijan automáticamente mediante ciclos de retroalimentación, y cuando no se pueden corregir después de los reintentos, el pipeline continúa con los problemas documentados en lugar de detenerse.
+
+La segunda es la transparencia total. El dashboard no muestra simplemente un spinner de cargando. Muestra cada decisión que el orquestador tomó, cada archivo que cada agente leyó o escribió, cada comando que ejecutó, y cada razonamiento que siguió. El usuario ve la orquesta dirigiéndose a sí misma.
+
+La tercera es la memoria entre ejecuciones. Cada proyecto mantiene una carpeta de orquesta con archivos JSON de cada ejecución anterior y un perfil del proyecto. En ejecuciones futuras, los agentes reciben las lecciones aprendidas de ejecuciones anteriores, evitando repetir errores.
+
+La cuarta es la optimización de costos. El usuario puede asignar modelos diferentes a cada tipo de agente. Por ejemplo, usar Claude Opus para el Desarrollador que necesita máxima capacidad, y Claude Haiku para los agentes de calidad que realizan verificaciones más simples. También hay límites de presupuesto y turnos máximos configurables por proyecto.
+
+La quinta es que es completamente local y privado. No hay cuenta que crear, no hay datos que suben a un servidor, no hay telemetría. Todo corre en la máquina del usuario con su propia clave de API o suscripción de Claude.
+
+Casos de Uso
+
+Un desarrollador individual puede describir una aplicación web completa y obtener código funcional con pruebas, revisión de seguridad y despliegue en minutos en lugar de horas. Un equipo puede usar Orchestra AI para prototipar rápidamente ideas y luego iterar sobre el código generado. Un estudiante puede aprender viendo cómo nueve agentes especializados abordan diferentes aspectos del desarrollo de software, desde la planificación hasta el despliegue.
+
+Estado Actual
+
+Orchestra AI está en versión 0.2.5. Incluye los nueve agentes completamente funcionales, el dashboard en tiempo real, soporte para múltiples proyectos simultáneos, reanudación de sesiones, memoria entre ejecuciones, y configuración flexible de modelos y presupuesto. Se instala como paquete npm global y está diseñado para funcionar con Claude Pro, Max, o API directa de Anthropic.

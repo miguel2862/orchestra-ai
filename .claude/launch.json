@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "orchestra-ai",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["-u", "CLAUDECODE", "-u", "CLAUDE_CODE_ENTRYPOINT", "node", "dist/cli/index.mjs"],
+      "port": 3847
+    },
+    {
+      "name": "arabor",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/miguel/orchestra-projects/arabor",
+      "port": 3000
+    }
+  ]
+}

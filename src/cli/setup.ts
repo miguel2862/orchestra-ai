@@ -162,13 +162,48 @@ export async function runSetup(): Promise<void> {
     playwrightSpinner.warn("Playwright install skipped (will auto-install on first use)");
   }
 
+  // 8. Gemini API key (optional — free, for image generation)
+  const wantsGemini = await confirm({
+    message: "Connect Google Gemini? (free — enables AI image generation for projects)",
+    default: true,
+  });
+
+  let geminiApiKey: string | undefined;
+  if (wantsGemini) {
+    console.log(chalk.dim("  Get a free API key at: https://aistudio.google.com"));
+    console.log(chalk.dim("  Sign in with your Google account → Create API key → Copy it\n"));
+
+    // Try to open the browser
+    try {
+      const openCmd = process.platform === "darwin" ? "open" :
+                     process.platform === "win32" ? "start" : "xdg-open";
+      execSync(`${openCmd} https://aistudio.google.com/apikey`, { stdio: "pipe" });
+    } catch { /* ignore */ }
+
+    geminiApiKey = await input({
+      message: "Gemini API Key (AIza...):",
+      validate: (val) => {
+        if (!val) return true; // Allow empty to skip
+        return val.startsWith("AIza") ? true : "Must start with AIza";
+      },
+    });
+    if (geminiApiKey) {
+      console.log(chalk.green("  ✓ Gemini connected — free image generation enabled\n"));
+    } else {
+      geminiApiKey = undefined;
+      console.log(chalk.dim("  Skipped — you can add it later in Settings\n"));
+    }
+  }
+
   // Save config
   const config: OrchestraConfig = {
     anthropicApiKey,
     githubToken,
+    geminiApiKey,
     defaultWorkingDir: workingDir,
     mcpServers: getDefaultMcpServers(),
     setupComplete: true,
+    configVersion: 2, // v0.3.0: Gemini, visual_tester, GitHub Device Flow
     maxTurns: DEFAULT_MAX_TURNS,
     maxBudgetUsd: DEFAULT_MAX_BUDGET_USD,
     gitEnabled,
@@ -180,4 +215,113 @@ export async function runSetup(): Promise<void> {
   console.log(
     chalk.green("\n  ✓ Configuration saved. Starting Orchestra AI...\n")
   );
+}
+
+/** Current config schema version — bump when adding new setup steps */
+export const CURRENT_CONFIG_VERSION = 2;
+
+/**
+ * Post-update reconfigure: runs ONLY the new setup steps that the user
+ * hasn't seen yet (e.g., Gemini, GitHub Device Flow, Playwright).
+ * Called when configVersion < CURRENT_CONFIG_VERSION after an update.
+ */
+export async function runPostUpdateSetup(existingConfig: OrchestraConfig): Promise<void> {
+  const chalk = (await import("chalk")).default;
+  const { confirm, input, select } = await import("@inquirer/prompts");
+  const ora = (await import("ora")).default;
+  const { execSync } = await import("node:child_process");
+
+  console.log(
+    chalk.bold("\n  🎵 Orchestra AI — New Features Available!\n")
+  );
+  console.log(
+    chalk.dim("  Your existing settings are preserved. Let's configure the new features.\n")
+  );
+
+  const oldVersion = existingConfig.configVersion || 0;
+  let updated = false;
+
+  // Features added in config version 2 (v0.3.0)
+  if (oldVersion < 2) {
+    // GitHub Device Flow (if they don't have a token yet)
+    if (!existingConfig.githubToken) {
+      const wantsGitHub = await confirm({
+        message: "Connect GitHub? (optional — lets agents push code to GitHub repos)",
+        default: false,
+      });
+
+      if (wantsGitHub) {
+        const ghMethod = await select({
+          message: "How do you want to connect GitHub?",
+          choices: [
+            { name: "🌐 Login via browser (recommended)", value: "device_flow" as const },
+            { name: "🔑 Paste a Personal Access Token", value: "pat" as const },
+          ],
+        });
+
+        if (ghMethod === "device_flow") {
+          try {
+            const { githubDeviceFlow } = await import("../server/github-oauth.js");
+            existingConfig.githubToken = await githubDeviceFlow((code, uri) => {
+              console.log(`\n  📋 Open: ${chalk.cyan(uri)}`);
+              console.log(`  Enter code: ${chalk.bold.yellow(code)}\n`);
+              try {
+                const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+                execSync(`${openCmd} ${uri}`, { stdio: "pipe" });
+              } catch { /* ignore */ }
+            });
+            console.log(chalk.green("  ✓ GitHub connected!\n"));
+            updated = true;
+          } catch (e) {
+            console.log(chalk.yellow(`  ⚠ GitHub auth failed: ${e}\n`));
+          }
+        } else {
+          const token = await input({ message: "GitHub PAT (ghp_...):" });
+          if (token) { existingConfig.githubToken = token; updated = true; }
+        }
+      }
+    }
+
+    // Gemini API key
+    if (!existingConfig.geminiApiKey) {
+      const wantsGemini = await confirm({
+        message: "Connect Google Gemini? (free — enables AI image generation)",
+        default: true,
+      });
+
+      if (wantsGemini) {
+        console.log(chalk.dim("  Get a free key at: https://aistudio.google.com\n"));
+        try {
+          const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+          execSync(`${openCmd} https://aistudio.google.com/apikey`, { stdio: "pipe" });
+        } catch { /* ignore */ }
+
+        const key = await input({
+          message: "Gemini API Key (AIza..., or Enter to skip):",
+          validate: (v) => !v || v.startsWith("AIza") ? true : "Must start with AIza",
+        });
+        if (key) { existingConfig.geminiApiKey = key; updated = true; }
+      }
+    }
+
+    // Playwright install
+    const playwrightSpinner = ora("Installing Playwright browser...").start();
+    try {
+      execSync("npx -y playwright install chromium", { stdio: "pipe", timeout: 120000 });
+      playwrightSpinner.succeed("Playwright browser installed");
+    } catch {
+      playwrightSpinner.warn("Playwright install skipped");
+    }
+  }
+
+  // Update config version
+  existingConfig.configVersion = CURRENT_CONFIG_VERSION;
+  const { saveConfig } = await import("../server/config.js");
+  saveConfig(existingConfig);
+
+  if (updated) {
+    console.log(chalk.green("\n  ✓ Configuration updated. Starting Orchestra AI...\n"));
+  } else {
+    console.log(chalk.dim("\n  ✓ All up to date. Starting Orchestra AI...\n"));
+  }
 }
