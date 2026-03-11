@@ -1,6 +1,7 @@
 import { loadConfig, isConfigComplete } from "../server/config.js";
 import { DEFAULT_PORT } from "../shared/constants.js";
 import { execSync } from "node:child_process";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 
 // On Windows, npm global binaries are wrapped as .cmd files.
 // Try `claude` first (works on macOS/Linux and Windows via PATH), then `claude.cmd`.
@@ -10,6 +11,161 @@ function claudeCmd(): string {
     return "claude.cmd";
   }
   return "claude";
+}
+
+interface ParsedCliArgs {
+  positional: string[];
+  flags: Record<string, string | boolean>;
+}
+
+function parseCliArgs(argv: string[]): ParsedCliArgs {
+  const positional: string[] = [];
+  const flags: Record<string, string | boolean> = {};
+
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i];
+
+    if (token.startsWith("--")) {
+      const [rawKey, inlineValue] = token.slice(2).split("=", 2);
+      if (!rawKey) continue;
+      if (inlineValue !== undefined) {
+        flags[rawKey] = inlineValue;
+        continue;
+      }
+      const next = argv[i + 1];
+      if (next && !next.startsWith("-")) {
+        flags[rawKey] = next;
+        i++;
+      } else {
+        flags[rawKey] = true;
+      }
+      continue;
+    }
+
+    if (token.startsWith("-") && token.length > 1) {
+      const shortFlags = token.slice(1).split("");
+      for (const shortFlag of shortFlags) {
+        flags[shortFlag] = true;
+      }
+      continue;
+    }
+
+    positional.push(token);
+  }
+
+  return { positional, flags };
+}
+
+function stringFlag(args: ParsedCliArgs, ...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = args.flags[name];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+function booleanFlag(args: ParsedCliArgs, ...names: string[]): boolean {
+  return names.some((name) => args.flags[name] === true);
+}
+
+function printGeminiHelp(): void {
+  console.log([
+    "Gemini commands:",
+    "  orchestra-ai gemini-status [--json]",
+    "  orchestra-ai gemini-image --prompt \"Describe the image\" --output assets/generated/example.png [--aspect-ratio 16:9] [--json]",
+    "",
+    "Notes:",
+    "  - Gemini image generation is optional and only works when geminiApiKey is configured.",
+    "  - Supported aspect ratios: 1:1, 3:4, 4:3, 9:16, 16:9",
+    "  - Use --soft-fail for optional generation inside agent workflows so quota or API issues do not stop the task.",
+  ].join("\n"));
+}
+
+async function handleGeminiStatus(args: ParsedCliArgs): Promise<number> {
+  const { getGeminiUsage, isGeminiAvailable } = await import("../server/gemini.js");
+  const payload = {
+    available: isGeminiAvailable(),
+    configured: isGeminiAvailable(),
+    usage: getGeminiUsage(),
+  };
+
+  if (booleanFlag(args, "json", "j")) {
+    console.log(JSON.stringify(payload));
+    return 0;
+  }
+
+  console.log(`Gemini configured: ${payload.configured ? "yes" : "no"}`);
+  console.log(`Images generated: ${payload.usage.imagesGenerated}`);
+  console.log(`Failed requests: ${payload.usage.requestsFailed}`);
+  console.log(`Rate limited: ${payload.usage.rateLimited ? "yes" : "no"}`);
+  return 0;
+}
+
+async function handleGeminiImage(args: ParsedCliArgs): Promise<number> {
+  if (booleanFlag(args, "help", "h")) {
+    printGeminiHelp();
+    return 0;
+  }
+
+  const prompt = stringFlag(args, "prompt", "p");
+  const output = stringFlag(args, "output", "o");
+  const aspectRatio = stringFlag(args, "aspect-ratio");
+  const json = booleanFlag(args, "json", "j");
+  const softFail = booleanFlag(args, "soft-fail");
+
+  if (!prompt || !output) {
+    const message = "gemini-image requires --prompt and --output";
+    if (json) console.log(JSON.stringify({ success: false, error: message }));
+    else {
+      console.error(message);
+      printGeminiHelp();
+    }
+    return 2;
+  }
+
+  const outputPath = isAbsolute(output) ? output : resolve(process.cwd(), output);
+  const outputDir = dirname(outputPath);
+  const filename = basename(outputPath);
+  const { generateImage } = await import("../server/gemini.js");
+  const result = await generateImage(prompt, outputDir, filename, { aspectRatio });
+
+  if (json) {
+    console.log(JSON.stringify({
+      success: result.success,
+      filePath: result.filePath,
+      error: result.error,
+      model: result.model,
+    }));
+  } else if (result.success && result.filePath) {
+    console.log(result.model ? `${result.filePath} (${result.model})` : result.filePath);
+  } else {
+    console.error(result.error || "Gemini image generation failed");
+  }
+
+  if (!result.success && softFail) return 0;
+  return result.success ? 0 : 1;
+}
+
+async function dispatchCliSubcommand(): Promise<boolean> {
+  const [subcommand, ...rest] = process.argv.slice(2);
+  if (!subcommand) return false;
+
+  if (subcommand === "gemini-help") {
+    printGeminiHelp();
+    process.exit(0);
+  }
+
+  const args = parseCliArgs(rest);
+  let code: number | null = null;
+
+  if (subcommand === "gemini-status") {
+    code = await handleGeminiStatus(args);
+  } else if (subcommand === "gemini-image") {
+    code = await handleGeminiImage(args);
+  }
+
+  if (code === null) return false;
+  process.exit(code);
 }
 
 async function checkClaudeCode(): Promise<{
@@ -126,7 +282,12 @@ async function main(): Promise<void> {
   await openBrowser(url);
 }
 
-main().catch((err) => {
+async function bootstrap(): Promise<void> {
+  if (await dispatchCliSubcommand()) return;
+  await main();
+}
+
+bootstrap().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });

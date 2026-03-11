@@ -153,6 +153,8 @@ Reads the PRD and decides *how* to build it. For greenfield work it designs the 
 
 The center of the star. Reads PRD + architecture and writes production code. Also receives structured fix reports from the quality agents and applies targeted corrections without rewriting what already works.
 
+If Google Gemini is configured, Developer can optionally generate a small number of project-specific assets through Orchestra CLI commands when the product genuinely needs them, for example a before/after comparison image or custom empty-state art.
+
 `Produces` → All production source changes &nbsp;&nbsp; `Tools` → Filesystem · Bash
 
 </td>
@@ -470,7 +472,7 @@ Everything is configurable from the **Settings** page in the web UI. Global conf
 |---------|-------------|
 | Anthropic API key | For API key auth |
 | GitHub token | Lets deploy flows create repos and push code |
-| Gemini API key | Optional image-generation key if you use image-related flows |
+| Gemini API key | Optional key for on-demand AI asset generation when a project truly needs custom imagery |
 | Default projects folder | Where new projects are created |
 | Main model | Latest aliases or pinned snapshots |
 | Subagent model | Use a cheaper model for specialized gates |
@@ -568,6 +570,26 @@ The visual gate is blocking:
 - it fails if browser tools are unavailable or if no live URL exists
 - it fails if a control looks interactive but clicking or typing produces no visible effect
 - it writes `VISUAL_TEST_REPORT.md` with page coverage, interaction coverage, console errors, visual issues, interactive issues, design assessment, and verdict
+
+</details>
+
+<details>
+<summary>Can Orchestra use Gemini to create project images?</summary>
+
+Yes, but it is intentionally **on-demand**, not automatic decoration. When a Gemini API key is configured, the Developer agent can call Orchestra CLI commands to create a small number of project-specific assets such as:
+
+- before / after scene comparisons
+- hero illustrations tied to the actual product concept
+- custom icons or empty-state art
+
+Typical commands:
+
+```bash
+orchestra-ai gemini-status --json
+orchestra-ai gemini-image --prompt "before-after urban tree restoration scene" --output public/generated/tree-before-after.png --aspect-ratio 16:9 --json --soft-fail
+```
+
+The agent is instructed to use this sparingly. If Gemini is unavailable, rate-limited, or the key is missing, the run continues without blocking and falls back to CSS, SVG, charts, or other non-generated visuals. Use `--soft-fail` for optional generation inside agent workflows.
 
 </details>
 

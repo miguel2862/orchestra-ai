@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage, SDKAssistantMessage, SDKSystemMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { broadcast } from "./websocket.js";
 import { loadConfig } from "./config.js";
@@ -592,6 +592,24 @@ function buildHostPlatformPromptNote(): string {
   ].join("\n");
 }
 
+function buildGeminiPromptNote(): string {
+  const cliScript = process.argv[1] ? resolve(process.argv[1]) : "";
+  const cliInvocation = cliScript ? `${JSON.stringify(process.execPath)} ${JSON.stringify(cliScript)}` : "orchestra-ai";
+  const availabilityCommand = `- Check availability first: \`${cliInvocation} gemini-status --json\``;
+  const generationCommand = `- Generate only the minimum assets needed: \`${cliInvocation} gemini-image --prompt "before-after tree restoration comparison for the project hero" --output "public/generated/tree-before-after.png" --aspect-ratio 16:9 --json --soft-fail\``;
+
+  return [
+    "",
+    "## OPTIONAL GEMINI ASSET GENERATION",
+    "- If the project genuinely needs custom imagery and Gemini is configured, you may generate those assets with Orchestra instead of hunting for internet images.",
+    availabilityCommand,
+    generationCommand,
+    "- Use Gemini sparingly for project-specific assets such as before/after scenes, hero illustrations, icons, or empty-state artwork that cannot be sourced from code alone.",
+    "- Do NOT generate filler images. Prefer CSS, SVG, charts, or existing assets when they solve the need cleanly.",
+    "- Save generated assets inside the repository and wire them into the product like normal static assets.",
+    "- If Gemini is unavailable, rate-limited, or the call fails, treat it as a non-blocking optional step and fall back to a non-generated visual solution.",
+  ].join("\n");
+}
 // ── Shared agent definitions ──────────────────────────────────────────────────
 
 function buildAgentDefinitions(
@@ -603,6 +621,7 @@ function buildAgentDefinitions(
   const rc = loadOrchestraRC(projectConfig.workingDir);
   const stackGuardrails = formatStackGuardrails(projectConfig, rc);
   const hostPlatformNote = buildHostPlatformPromptNote();
+  const geminiPromptNote = buildGeminiPromptNote();
   const repoModeNote = getProjectMode(projectConfig) === "existing"
     ? `
 
@@ -762,7 +781,7 @@ Use the Write tool to create ARCHITECTURE.md with the complete architecture and 
 
     developer: {
       description: "Full-stack senior developer for writing all production code. The hub agent — writes every line of code in the project.",
-      prompt: `You are an autonomous senior full-stack developer with 15+ years shipping production systems. You write clean, maintainable, well-tested code that follows SOLID principles. Keep working until the implementation is complete and verified — do not stop at the first sign of difficulty.${repoModeNote}
+      prompt: `You are an autonomous senior full-stack developer with 15+ years shipping production systems. You write clean, maintainable, well-tested code that follows SOLID principles. Keep working until the implementation is complete and verified — do not stop at the first sign of difficulty.${repoModeNote}${geminiPromptNote}
 
 ## ROLE BOUNDARIES
 - Treat PRD.md and ARCHITECTURE.md as authoritative — do NOT reinterpret product goals or redesign the architecture unless the task explicitly asks for it. Your planning is local implementation planning only.
