@@ -153,8 +153,6 @@ function parseUtil(obj: any): number {
  * with utilization as 0.0–1.0 floats.
  */
 function parseApiResponse(data: any): SubscriptionUsage {
-  console.log("[subscription] Raw API response:", JSON.stringify(data, null, 2).slice(0, 1000));
-
   const fiveHour = data?.five_hour ?? data?.session ?? {};
   const sevenDay = data?.seven_day ?? data?.weekly ?? {};
   const sevenDayOpus = data?.seven_day_opus ?? {};
@@ -276,7 +274,7 @@ async function fetchFromApi(token: string): Promise<SubscriptionUsage> {
       Authorization: `Bearer ${token}`,
       "anthropic-beta": "oauth-2025-04-20",
       "Content-Type": "application/json",
-      "User-Agent": "orchestra-ai/0.1.0",
+      "User-Agent": "orchestra-ai-app/0.1.0",
     },
     signal: AbortSignal.timeout(15000),
   });

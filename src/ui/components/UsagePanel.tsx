@@ -383,11 +383,16 @@ function formatTokens(n: number): string {
 }
 
 function friendlyModelName(model: string): string {
-  if (model.includes("opus-4-6")) return "Opus 4.6";
-  if (model.includes("opus-4-5")) return "Opus 4.5";
-  if (model.includes("sonnet-4-5")) return "Sonnet 4.5";
-  if (model.includes("sonnet-4")) return "Sonnet 4";
-  if (model.includes("haiku")) return "Haiku";
+  // Most specific first (longer suffix wins over shorter)
+  if (model.includes("opus-4-6"))    return "Opus 4.6";
+  if (model.includes("opus-4-5"))    return "Opus 4.5";
+  if (model.includes("opus-4"))      return "Opus 4";
+  if (model.includes("sonnet-4-6"))  return "Sonnet 4.6";
+  if (model.includes("sonnet-4-5"))  return "Sonnet 4.5";
+  if (model.includes("sonnet-4"))    return "Sonnet 4";
+  if (model.includes("haiku-4-5"))   return "Haiku 4.5";
+  if (model.includes("haiku-3-5"))   return "Haiku 3.5";
+  if (model.includes("haiku"))       return "Haiku";
   return model.replace("claude-", "").replace(/-\d{8}$/, "");
 }
 
