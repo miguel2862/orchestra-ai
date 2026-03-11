@@ -274,6 +274,46 @@ const BUILT_IN_STACK_GUARDS: StackGuard[] = [
       "Broken visuals, blank screens, failed requests, and dead interactions are blocking issues, not optional polish.",
     ],
   },
+  {
+    id: "offline_local_runtime",
+    title: "Offline Local Runtime",
+    matches: (context) => /offline|local-first|local first|no external api|no paid api|runtime must not depend|runtime reads from local|sqlite|local snapshot/.test(context),
+    instructions: [
+      "When the brief forbids runtime APIs, treat remote access as ingestion-only. Production runtime must read local project-controlled files and databases only.",
+      "If the brief references absolute source paths outside the working directory, create an explicit bootstrap/import step that stages the required snapshot into a project-local data directory before wiring runtime features.",
+      "Every user-facing recommendation or report must expose snapshot metadata, recency/cut date, and known source incidents explicitly rather than hiding stale data.",
+    ],
+  },
+  {
+    id: "local_dataset_bootstrap",
+    title: "Local Dataset Bootstrap",
+    matches: (context) => /dataset|catalogos|metadatos|recency registry|csv|geojson|image bank|sqlite|snapshot|inventory|inventarios/.test(context),
+    instructions: [
+      "Do not hardwire user-specific absolute filesystem paths into runtime routes or screens. Source paths are ingestion inputs; runtime should use project-local copies under the repository workspace.",
+      "The first implementation steps must validate required source files and copy or stage only the needed SQLite, CSV, GeoJSON, and image assets into the project before normal runtime use.",
+      "Missing local artifacts must fail fast with actionable setup instructions instead of hanging, silently degrading, or pretending success.",
+    ],
+  },
+  {
+    id: "before_after_simulation",
+    title: "Before/After Simulation",
+    matches: (context) => /before\/?after|simulation|mask\.png|before\.jpg|after_5y|after_10y|board|prompt synthesis|comfyui|a1111|fooocus|inpaint/.test(context),
+    instructions: [
+      "Before/after flows must be executable end-to-end locally: required inputs, prompt or manifest generation, job status, output artifacts, and final board composition.",
+      "If a local generation backend is unavailable, the UI must show a clear blocked or unavailable state with next actions. Never leave the workflow hanging or fake-complete.",
+      "Prefer free/local tooling such as ComfyUI, AUTOMATIC1111, Fooocus, Python diffusers, Pillow, and OpenCV for generation orchestration and board composition before inventing paid runtime dependencies.",
+      "Verify that the expected board artifact and intermediate outputs are actually written to disk before the feature is considered complete.",
+    ],
+  },
+  {
+    id: "branding_fidelity",
+    title: "Branding Fidelity",
+    matches: (context) => /brand|branding|logo|icon|leaf|tree|arbor|arabor|visual identity/.test(context),
+    instructions: [
+      "Explicit brand directives in the brief are binding. If the brief specifies a motif or icon, implement it consistently instead of substituting a generic placeholder.",
+      "If the product identity implies a concrete symbol such as a leaf or tree motif, carry it through the app shell, favicon, key navigation surfaces, and empty states.",
+    ],
+  },
 ];
 
 function formatStackGuardrails(projectConfig: ProjectConfig, rc: OrchestraRC): string {
@@ -689,6 +729,7 @@ Use the Write tool to create PRD.md with the complete PRD and ALL sections above
 - NEVER skip scope boundaries — OUT OF SCOPE is as important as IN SCOPE
 - If unsure about a requirement, define it with the SIMPLEST reasonable interpretation
 - Think like the user, not the engineer — focus on outcomes, not implementation
+- If the brief includes hard runtime constraints, local dataset paths, visual identity directions, or required generated artifacts, carry them into PRD.md as binding requirements rather than optional notes
 - Before finishing, verify that PRD.md exists in the working directory. If it does not exist yet, write it before responding.`,
       tools: ["Read", "Write", "WebSearch", "WebFetch"],
       ...agentMdl("product_manager"),
@@ -773,6 +814,8 @@ Use the Write tool to create ARCHITECTURE.md with the complete architecture and 
 - NEVER use vague descriptions: "a service layer" → "src/services/user.service.ts exports UserService with methods: create(), findById(), update(), delete()"
 - Data models must include ALL fields — the Developer should not have to invent any
 - Every design decision must trace to a PRD requirement
+- If required source data lives outside the repo, define the bootstrap/import workflow that stages it into project-local directories before runtime use
+- If the brief requires local simulation or generated boards, specify the concrete local toolchain, status model, required inputs, and output artifacts
 - Prefer simplicity — the simplest architecture that satisfies all P0 requirements wins
 - Before finishing, verify that ARCHITECTURE.md exists in the working directory. If it does not exist yet, write it before responding.`,
       tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write"],
@@ -793,6 +836,7 @@ Use the Write tool to create ARCHITECTURE.md with the complete architecture and 
 3. Identify ALL files that need to be created or modified
 4. Plan your implementation order: data models/types → core logic → API/services → UI → wiring
 5. Identify edge cases and error scenarios from the requirements
+6. If the brief references local source datasets or databases outside the repo, plan the bootstrap/import step that copies the required snapshot into the project before wiring runtime code
 
 ## PHASE 2 — IMPLEMENT (incremental, verified progress)
 Build features incrementally — complete one module before starting the next:
@@ -888,6 +932,7 @@ Your interfaces must look like they were designed by a world-class UI/UX expert.
 - Smooth gradients, glassmorphism with soft shadows, layered depth
 - Modern typography: import Google Fonts (Inter, Outfit, Plus Jakarta Sans) — never browser defaults
 - Consistent spacing system (4px/8px grid)
+- If the brief specifies a visual motif or iconography direction (for example, a leaf icon), treat it as binding branding guidance rather than optional decoration
 
 ### Micro-Animations — EVERYWHERE
 - Install framer-motion (React) or use CSS @keyframes (vanilla) — animations are REQUIRED, not optional
