@@ -252,6 +252,170 @@ export function extractLessonsFromRun(params: {
   return added;
 }
 
+// ── Extract lessons from user feedback (post-completion conversations) ───────
+
+/**
+ * Called after a resumed session completes. Analyzes the USER's complaint
+ * message paired with the agent's fix to create high-value lessons.
+ *
+ * User-reported lessons get hitCount: 2 (higher weight than auto-detected)
+ * because the user explicitly identified the problem.
+ */
+export function extractLessonsFromFeedback(params: {
+  userMessage: string;
+  agentMessages: Array<{ agent: string; text: string }>;
+  techStack: string;
+}): Lesson[] {
+  const { userMessage, agentMessages, techStack } = params;
+  const stacks = extractStacks(techStack);
+  const added: Lesson[] = [];
+
+  // Classify the user's complaint into a category
+  const category = classifyUserFeedback(userMessage);
+
+  // Extract what the agent fixed from its messages
+  const fixSummary = extractFixFromAgentMessages(agentMessages);
+
+  // Only create a lesson if we can extract meaningful info
+  if (!fixSummary) return added;
+
+  // Build a concise summary from the user's message
+  const summary = buildLessonSummary(userMessage);
+
+  if (summary && fixSummary) {
+    const lesson = addLesson({
+      agent: "user_feedback",
+      category,
+      summary,
+      fix: fixSummary,
+      stacks,
+    });
+    // Bump hitCount to 2 for user-reported lessons (higher weight)
+    if (lesson.hitCount === 1) {
+      lesson.hitCount = 2;
+      const lessons = loadLessons();
+      const idx = lessons.findIndex((l) => l.id === lesson.id);
+      if (idx !== -1) { lessons[idx] = lesson; saveLessons(lessons); }
+    }
+    added.push(lesson);
+  }
+
+  return added;
+}
+
+/**
+ * Called after a build completes. Extracts lessons from feedback loop reasons.
+ * When a quality gate fails and sends work back to Developer, the REASON
+ * for that failure is itself a lesson for future projects.
+ */
+export function extractLessonsFromFeedbackLoops(params: {
+  feedbackLoops: Array<{ qualityGate: string; reason?: string; resolved: boolean }>;
+  techStack: string;
+}): Lesson[] {
+  const { feedbackLoops, techStack } = params;
+  const stacks = extractStacks(techStack);
+  const added: Lesson[] = [];
+
+  for (const loop of feedbackLoops) {
+    if (!loop.reason || loop.reason.length < 10) continue;
+
+    const category = mapGateToCategory(loop.qualityGate);
+    added.push(addLesson({
+      agent: loop.qualityGate,
+      category,
+      summary: `${loop.qualityGate} quality gate failed: ${loop.reason.slice(0, 150)}`,
+      fix: loop.resolved
+        ? `Issue was resolved after feedback loop. Avoid this pattern in initial implementation.`
+        : `Issue was NOT fully resolved. Pay extra attention to this pattern.`,
+      stacks,
+    }));
+  }
+
+  return added;
+}
+
+// ── Feedback classification helpers ─────────────────────────────────────────
+
+function classifyUserFeedback(msg: string): Lesson["category"] {
+  const lower = msg.toLowerCase();
+
+  // UI/visual issues
+  if (/no (se ve|carga|muestra|aparece|funciona)|pantalla en blanco|blank|white screen|broken layout|no render|not showing|not loading|missing/i.test(msg)) {
+    return "runtime";
+  }
+  // Design complaints
+  if (/feo|ugly|diseño|design|estilo|style|color|animaci|animation|responsive|mobile/i.test(msg)) {
+    return "design";
+  }
+  // Error/crash
+  if (/error|crash|exception|falla|rompe|break|bug|undefined|null|NaN/i.test(msg)) {
+    return "runtime";
+  }
+  // Config/build
+  if (/config|build|compile|install|dependency|version|package/i.test(msg)) {
+    return "config";
+  }
+  // Test
+  if (/test|spec|assert|expect/i.test(msg)) {
+    return "test";
+  }
+  // Syntax
+  if (/syntax|parse|token|invalid/i.test(msg)) {
+    return "syntax";
+  }
+
+  return "other";
+}
+
+function extractFixFromAgentMessages(messages: Array<{ agent: string; text: string }>): string | null {
+  if (messages.length === 0) return null;
+
+  // Look for messages that describe fixes (edit, write, change patterns)
+  const fixPatterns = [
+    /(?:fixed|added|changed|replaced|updated|removed|moved|wrapped|converted)\s+(.{10,120})/i,
+    /(?:the (?:issue|problem|bug|error) was)\s+(.{10,120})/i,
+    /(?:now|should)\s+(?:correctly|properly)\s+(.{10,80})/i,
+  ];
+
+  for (const msg of messages) {
+    for (const pattern of fixPatterns) {
+      const match = pattern.exec(msg.text);
+      if (match) return match[0].slice(0, 200);
+    }
+  }
+
+  // Fallback: use the last agent message (usually the summary)
+  const last = messages[messages.length - 1];
+  if (last && last.text.length > 10) {
+    return last.text.slice(0, 200);
+  }
+
+  return null;
+}
+
+function buildLessonSummary(userMessage: string): string {
+  // Clean and truncate user message into a lesson summary
+  const cleaned = userMessage
+    .replace(/\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+
+  if (cleaned.length < 5) return "";
+  return `User reported: ${cleaned}`;
+}
+
+function mapGateToCategory(gate: string): Lesson["category"] {
+  switch (gate) {
+    case "error_checker": return "syntax";
+    case "security": return "runtime";
+    case "tester": return "test";
+    case "reviewer": return "design";
+    case "deployer": return "config";
+    default: return "other";
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function extractStacks(techStack: string): string[] {

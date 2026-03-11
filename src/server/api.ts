@@ -163,4 +163,47 @@ export function setupApiRoutes(app: Express): void {
     clearLessons();
     res.json({ ok: true });
   });
+
+  // ── GitHub Device Flow OAuth ──
+  app.post("/api/github/device-code", async (_req, res) => {
+    try {
+      const { requestDeviceCode } = await import("./github-oauth.js");
+      const data = await requestDeviceCode();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  app.post("/api/github/poll-token", async (req, res) => {
+    try {
+      const { device_code, interval, expires_in } = req.body;
+      if (!device_code) return res.status(400).json({ error: "device_code required" });
+      const { pollForToken } = await import("./github-oauth.js");
+      const token = await pollForToken(device_code, interval || 5, expires_in || 900);
+      // Auto-save to config
+      const config = loadConfig();
+      if (config) {
+        config.githubToken = token;
+        saveConfig(config);
+      }
+      res.json({ token: "ghu_****" + token.slice(-4), saved: true });
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  // ── Playwright Install ──
+  app.post("/api/playwright/install", async (_req, res) => {
+    try {
+      const { execSync } = await import("node:child_process");
+      execSync("npx -y playwright install chromium", {
+        stdio: "pipe",
+        timeout: 120000,
+      });
+      res.json({ ok: true, message: "Playwright chromium installed" });
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
 }

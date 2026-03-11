@@ -42,7 +42,7 @@ const DEFAULT_MCP_SERVERS: McpServerEntry[] = [
     command: "npx",
     args: ["-y", "@playwright/mcp@latest"],
     description: "Browser automation and testing",
-    enabled: false, // Off by default — heavy dependency
+    enabled: true, // Required by visual_tester agent for browser testing
   },
 ];
 

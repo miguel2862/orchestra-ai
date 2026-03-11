@@ -10,7 +10,7 @@ import { buildMcpServerConfig } from "./mcp.js";
 import { createProject, updateProject, appendProjectEvent } from "./project-store.js";
 import { initGitRepo, commitTask } from "./git-manager.js";
 import { estimateCost } from "./cost-tracker.js";
-import { formatLessonsForPrompt, extractLessonsFromRun } from "./lessons.js";
+import { formatLessonsForPrompt, extractLessonsFromRun, extractLessonsFromFeedback, extractLessonsFromFeedbackLoops } from "./lessons.js";
 import type { ProjectConfig, Project, ModelId, AgentModelAlias, AgentRunStat } from "../shared/types.js";
 
 const activeProjects = new Map<string, { close: () => void }>();
@@ -349,7 +349,42 @@ The single most common bug in full-stack apps: the server returns shape A, the c
 - NEVER use synchronous file operations (fs.readFileSync, fs.existsSync, fs.readdirSync) in server routes or services — they block the entire Node.js event loop and freeze ALL concurrent requests
 - Always use fs.promises.readFile, fs.promises.readdir, etc., or the fs/promises import
 - Exception: only use sync I/O at module initialization time (top-level), never inside request handlers
-- If a function calls async I/O, it must be async all the way up the call chain`,
+- If a function calls async I/O, it must be async all the way up the call chain
+
+## UI/UX PREMIUM — OBLIGATORIO (apps con interfaz)
+Your interfaces must look like they were designed by a world-class UI/UX expert. This is NON-NEGOTIABLE.
+
+### Visual Quality
+- Rich, curated color palettes — NEVER plain red/blue/green. Use HSL-based harmonious palettes or established design systems
+- Smooth gradients, glassmorphism with soft shadows, layered depth
+- Modern typography: import Google Fonts (Inter, Outfit, Plus Jakarta Sans) — never browser defaults
+- Consistent spacing system (4px/8px grid)
+
+### Micro-Animations — EVERYWHERE
+- Install framer-motion (React) or use CSS @keyframes (vanilla) — animations are REQUIRED, not optional
+- Page transitions: fade-in + subtle slide on route changes
+- Hover effects: scale, color shift, shadow lift on EVERY interactive element
+- Loading states: skeleton loaders with shimmer effect (pulse gradient) — NEVER spinner-only or blank
+- Data appearance: stagger children with delay, count-up for numbers
+- Scroll-triggered: elements fade/slide in as they enter viewport
+
+### Interactive by Default
+- Charts/graphs: tooltips on hover, click to filter, zoom, pan. Use Recharts/Chart.js with custom themes
+- Tables: sortable columns, row hover highlight, search/filter. Never static tables
+- Maps: clusters for dense data, popups with rich content, layer toggles, smooth zoom
+- Forms: real-time validation with inline feedback, submit button with loading state
+
+### States — ALL Must Look Good
+- Loading: skeleton loaders matching the layout shape (not generic spinners)
+- Empty: illustration or icon + helpful message + CTA button. Never just \"No data\"
+- Error: clear message + retry button + suggestion. Never raw error text
+- Success: brief animation (checkmark, confetti for major actions)
+
+### Responsive & Accessible
+- Mobile-first: every layout must work at 375px width minimum
+- Dark/light toggle with \`prefers-color-scheme\` respect
+- Focus-visible styles on all interactive elements
+- Proper heading hierarchy (single h1, semantic HTML)`,
       tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       ...agentMdl("developer"),
     },
@@ -955,6 +990,77 @@ FINAL LINE (required): End your response with EXACTLY one of:
       tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       ...agentMdl("deployer"),
     },
+
+    visual_tester: {
+      description: "Visual QA engineer that opens the app in a real browser via Playwright to verify it works visually, catches console errors, and validates user interactions.",
+      prompt: `You are a senior visual QA engineer. You test web applications by ACTUALLY OPENING THEM in a real browser using Playwright MCP tools. You don't just read code — you interact with the live app like a real user would.
+
+## YOUR MISSION
+Open the running application in a browser and verify it works correctly from a visual and functional perspective. Find issues that code review and unit tests miss: blank screens, missing data, broken layouts, console errors, non-functional buttons.
+
+## PHASE 1 — PREPARATION
+1. Read ARCHITECTURE.md to understand the app's pages, routes, and key features
+2. Read the Deployer's output to find the URL where the app is running (e.g., http://localhost:3000)
+3. List all routes/pages that need testing from the architecture
+
+## PHASE 2 — BROWSER TESTING (use Playwright MCP tools)
+
+### 2a. Initial Load
+- Navigate to the main URL using browser_navigate
+- Take an accessibility snapshot using browser_snapshot to verify the page structure
+- Check console for errors: any JavaScript exceptions, 404s, CORS failures, or warnings
+- Verify the page is NOT blank — it should have visible content, navigation, and styled elements
+
+### 2b. Page Navigation
+- For EACH major route/page in the app:
+  - Navigate to it (click links or direct URL)
+  - Take browser_snapshot to verify content renders
+  - Check console for new errors
+  - Verify data displays: tables should have rows, charts should have data points, maps should have markers/layers
+
+### 2c. Interactive Elements
+- Click buttons and verify they respond (state changes, modals open, forms submit)
+- Test form inputs: type text, select dropdowns, toggle checkboxes
+- Test navigation: all links work, back button works, no dead ends
+- On maps: verify markers/clusters are visible, popups work on click
+- On charts: verify tooltips appear on hover
+
+### 2d. Visual Quality Checks
+- Verify styles are loaded (not unstyled HTML)
+- Verify images/icons render (no broken image placeholders)
+- Verify text is readable (not overflowing, not clipped, proper contrast)
+- Verify responsive behavior: if possible, check at narrower viewport
+
+### 2e. Console Error Audit
+- After visiting all pages, compile all console errors and warnings
+- Filter out non-critical warnings (deprecation notices, dev-mode warnings)
+- Focus on: uncaught exceptions, failed network requests, React errors, null/undefined access
+
+## PHASE 3 — REPORT
+Write VISUAL_TEST_REPORT.md with:
+- Pages tested: list each URL visited and its status
+- Console errors: any JavaScript errors found
+- Visual issues: missing data, broken layouts, unstyled elements
+- Interactive issues: buttons that don't work, forms that don't submit
+- Screenshots/snapshots: describe what was seen on each page
+
+## COMMON ISSUES TO CATCH
+- Blank page on load (React didn't mount, JavaScript error)
+- Data-driven components showing "No data" or empty when database has records
+- Map markers at 0,0 (null coordinates not handled)
+- Charts rendering with no data (axis labels but empty graph)
+- Console errors: "Cannot read property of undefined" (missing null checks)
+- Broken images (wrong path or missing file)
+- Forms submitting but nothing happens (missing handler or API endpoint)
+- Links to routes that return 404
+- Duplicate React keys causing wrong element rendering
+
+FINAL LINE (required): End your response with EXACTLY one of:
+"QUALITY GATE: PASS" — app loads, all pages render, no console errors, interactions work
+"QUALITY GATE: FAIL — [issue1]; [issue2]" — visual or functional issues found`,
+      tools: ["Read", "Glob", "Grep", "Bash"],
+      ...agentMdl("visual_tester"),
+    },
   };
 
   if (!usesDB) delete agents.database;
@@ -967,7 +1073,7 @@ function detectQualityGate(retriedAgent: string, completionCount: Map<string, nu
   // Determine which quality gate likely triggered this re-run
   if (retriedAgent === "developer") {
     // Check in reverse pipeline order — most recently completed gate wins
-    for (const gate of ["deployer", "reviewer", "tester", "security", "error_checker"]) {
+    for (const gate of ["visual_tester", "deployer", "reviewer", "tester", "security", "error_checker"]) {
       if ((completionCount.get(gate) || 0) > 0) return gate;
     }
   }
@@ -1148,7 +1254,7 @@ async function runAgent(
 
               // Detect subagent delegation
               if (block.name === "Task" || block.name === "Agent") {
-                const validAgents = ["product_manager", "architect", "developer", "database", "security", "error_checker", "tester", "reviewer", "deployer"];
+                const validAgents = ["product_manager", "architect", "developer", "database", "security", "error_checker", "tester", "reviewer", "deployer", "visual_tester"];
                 let agent = "unknown";
                 const st = block.input?.subagent_type;
                 console.log(`[orchestrator] ${projectId}: ${block.name} call subagent_type="${st}"`);
@@ -1166,6 +1272,7 @@ async function runAgent(
                   else if (hint.includes("test") || hint.includes("qa") || hint.includes("coverage")) agent = "tester";
                   else if (hint.includes("review") || hint.includes("quality") || hint.includes("refactor")) agent = "reviewer";
                   else if (hint.includes("deploy") || hint.includes("docker") || hint.includes("readme") || hint.includes("ci") || hint.includes("github")) agent = "deployer";
+                  else if (hint.includes("visual") || hint.includes("browser") || hint.includes("playwright") || hint.includes("screenshot") || hint.includes("visual test")) agent = "visual_tester";
                 }
 
                 activeTaskIds.add(block.id);
@@ -1244,6 +1351,8 @@ async function runAgent(
       saveRunMemory(projectConfig.workingDir, { projectId, projectName: projectConfig.name, stack: projectConfig.techStack, startedAt: new Date(startTime).toISOString(), completedAt: new Date().toISOString(), success: true, totalCostUsd, durationMs: Date.now() - startTime, numTurns, agentStats: stats, decisions: [], feedbackLoops: completedLoops });
       // Extract lessons from this run
       try { extractLessonsFromRun({ agentMessages, techStack: projectConfig.techStack, success: true }); } catch {}
+      // Extract lessons from feedback loops (quality gate failures)
+      try { extractLessonsFromFeedbackLoops({ feedbackLoops: completedLoops, techStack: projectConfig.techStack }); } catch {}
     }
 
   } catch (error) {
@@ -1269,6 +1378,8 @@ async function handleCompletion(projectId: string, result: SDKResultMessage, sta
   } catch {}
   // Extract lessons from agent output
   try { extractLessonsFromRun({ agentMessages, techStack: projectConfig.techStack, success }); } catch {}
+  // Extract lessons from feedback loops
+  try { extractLessonsFromFeedbackLoops({ feedbackLoops: completedLoops, techStack: projectConfig.techStack }); } catch {}
 }
 
 function buildAgentStats(agentStats: Record<string, AgentRunStat>): Record<string, AgentRunStat> {
@@ -1317,6 +1428,7 @@ async function runResumedAgent(
 ): Promise<void> {
   let totalCostUsd = 0; let totalInputTokens = 0; let totalOutputTokens = 0;
   const startTime = Date.now(); let numTurns = 0;
+  const agentMessages: Array<{ agent: string; text: string }> = [];
 
   try {
     const mainModel = resolveModel(projectConfig, config);
@@ -1354,7 +1466,11 @@ async function runResumedAgent(
         numTurns++;
         const content = ast.message?.content ?? [];
         for (const block of content) {
-          if (block.type === "text" && block.text) emit(projectId, { type: "agent_message", projectId, timestamp: Date.now(), data: { text: block.text, isSubagent: false } });
+          if (block.type === "text" && block.text) {
+            emit(projectId, { type: "agent_message", projectId, timestamp: Date.now(), data: { text: block.text, isSubagent: false } });
+            // Collect agent messages for lesson extraction
+            agentMessages.push({ agent: "orchestrator", text: block.text.slice(0, 500) });
+          }
           if (block.type === "tool_use") emit(projectId, { type: "task_progress", projectId, timestamp: Date.now(), data: { tool: block.name, file: block.input?.file_path || block.input?.pattern } });
         }
         const usage = ast.message?.usage;
@@ -1371,9 +1487,18 @@ async function runResumedAgent(
       emit(projectId, { type: "project_completed", projectId, timestamp: Date.now(), data: { success: true, result: "Continued.", totalCostUsd, durationMs: Date.now() - startTime, numTurns } });
       await updateProject(projectId, { status: "completed", totalCostUsd, durationMs: Date.now() - startTime, numTurns });
     }
+
+    // Extract lessons from user feedback conversation
+    try {
+      extractLessonsFromFeedback({ userMessage: prompt, agentMessages, techStack: projectConfig.techStack });
+    } catch {}
   } catch (error) {
     emit(projectId, { type: "project_error", projectId, timestamp: Date.now(), data: { error: String(error) } });
     await updateProject(projectId, { status: "failed" });
+    // Still try to extract lessons even on failure
+    try {
+      extractLessonsFromFeedback({ userMessage: prompt, agentMessages, techStack: projectConfig.techStack });
+    } catch {}
   } finally { activeProjects.delete(projectId); }
 }
 
@@ -1382,7 +1507,7 @@ async function runResumedAgent(
 function buildSystemPrompt(projectConfig: ProjectConfig, template: string): string {
   const usesDB = projectUsesDatabase(projectConfig);
   const pushGH = projectConfig.pushToGithub;
-  const totalAgents = usesDB ? 9 : 8;
+  const totalAgents = usesDB ? 10 : 9;
 
   return `${template}
 
@@ -1401,6 +1526,7 @@ You are the lead orchestrator for a software project. You are a COORDINATOR ONLY
 | Tester | \`tester\` | Unit, integration, E2E tests |
 | Reviewer | \`reviewer\` | Code quality, performance, maintainability |
 | Deployer | \`deployer\` | Docker, CI/CD, README${pushGH ? ", GitHub push" : ""} |
+| Visual Tester | \`visual_tester\` | Browser testing via Playwright — opens Chrome, navigates app, checks console |
 
 ## PROJECT
 - Name: ${projectConfig.name}
@@ -1419,6 +1545,7 @@ Phase ${usesDB ? 4 : 3} → Task(subagent_type="error_checker", ...) AND Task(su
 Phase ${usesDB ? 5 : 4} → Task(subagent_type="tester", ...)
 Phase ${usesDB ? 6 : 5} → Task(subagent_type="reviewer", ...)
 Phase ${usesDB ? 7 : 6} → Task(subagent_type="deployer", ...)
+Phase ${usesDB ? 8 : 7} → Task(subagent_type="visual_tester", prompt="Open the running app in a browser. URL: [paste from deployer output]. Test all pages, check console for errors, click interactive elements, verify data renders. Read ARCHITECTURE.md for routes.")
 
 ### Feedback Loops (MANDATORY — check QUALITY GATE signal after each quality gate):
 
@@ -1459,6 +1586,13 @@ AFTER Deployer completes → Check its QUALITY GATE signal:
   → Task(subagent_type="error_checker", prompt="FEEDBACK LOOP: deployer found app doesn't start. Diagnose and fix.")
   → Then Task(subagent_type="developer", ...) if error_checker finds code issues
   → Re-verify: start app, curl main URL. Max 2 retry loops.
+- "QUALITY GATE: PASS": proceed immediately to Visual Tester.
+
+AFTER Visual Tester completes → Check its QUALITY GATE signal:
+- "QUALITY GATE: FAIL — [visual issues]":
+  → Announce: "FEEDBACK LOOP 1: Routing from visual_tester back to developer because: [visual issues]"
+  → Task(subagent_type="developer", prompt="FEEDBACK LOOP: visual_tester found issues when testing the app in a real browser. ISSUES: [paste]. Fix these visual/functional issues.")
+  → Re-run Task(subagent_type="visual_tester", ...) to verify. Max 3 retry loops.
 - "QUALITY GATE: PASS": project complete.
 
 ### Loop Announcement Format (follow exactly):
@@ -1472,11 +1606,11 @@ After loop: "FEEDBACK LOOP [N] COMPLETE: [resolved/partially resolved/unresolved
 4. Pass full context in every agent's prompt (what previous agents produced)
 5. Use TodoWrite to track progress including retry loops
 6. Work autonomously — never ask questions
-7. Max retries: 3 for error_checker/tester/reviewer gates, 2 for security/deployer gates
+7. Max retries: 3 for error_checker/tester/reviewer/visual_tester gates, 2 for security/deployer gates
 8. End result must be WORKING, RUNNABLE code — use feedback loops to achieve this
 
 ## VALID subagent_type VALUES
-"product_manager", "architect", "developer"${usesDB ? ', "database"' : ''}, "security", "error_checker", "tester", "reviewer", "deployer"
+"product_manager", "architect", "developer"${usesDB ? ', "database"' : ''}, "security", "error_checker", "tester", "reviewer", "deployer", "visual_tester"
 
 ## UI/UX — Make it EXCEPTIONAL (for all user-facing apps)
 Today's date: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
@@ -1532,11 +1666,12 @@ ${usesDB ? "4" : "3"}. SAME RESPONSE: Task(subagent_type="error_checker", ...) +
 ${usesDB ? "5" : "4"}. Task(subagent_type="tester", ...)
 ${usesDB ? "6" : "5"}. Task(subagent_type="reviewer", ...)
 ${usesDB ? "7" : "6"}. Task(subagent_type="deployer", ...)
+${usesDB ? "8" : "7"}. Task(subagent_type="visual_tester", prompt="Open the running app in Chrome. Test all pages, check console for errors, click interactive elements, verify data renders.")
 
-After each quality gate (Error Checker, Tester, Reviewer, Deployer), READ their output.
+After each quality gate (Error Checker, Tester, Reviewer, Deployer, Visual Tester), READ their output.
 If they found unresolved issues → route back to Developer to fix → re-verify.
 Max 3 retries per gate. The goal is WORKING code, not just "all agents ran."
 Announce each loop: "FEEDBACK LOOP [N]: Routing from [agent] back to [agent] because: [reason]"
 
-Do NOT write any code yourself. Start with Phase 1 now.`;
+Do NOT write any code yourself. Start with Phase 0 now.`;
 }

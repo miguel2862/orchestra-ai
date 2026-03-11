@@ -44,7 +44,8 @@ export type AgentId =
   | "security"
   | "tester"
   | "reviewer"
-  | "deployer";
+  | "deployer"
+  | "visual_tester";    // Final phase — browser testing via Playwright
 
 // ── Config ──
 export interface OrchestraConfig {
