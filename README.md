@@ -16,7 +16,7 @@
 
 <br/>
 
-[📦 npm package](https://www.npmjs.com/package/orchestra-ai-app) · [🐛 Issues](https://github.com/miguel2862/orchestra-ai/issues) · [🤖 Powered by Claude Agent SDK](https://github.com/anthropics/claude-code)
+[📦 Install](https://www.npmjs.com/package/orchestra-ai-app) · [🛠️ Update](https://www.npmjs.com/package/orchestra-ai-app) · [🐛 Issues](https://github.com/miguel2862/orchestra-ai/issues) · [🤖 Claude Agent SDK](https://github.com/anthropics/claude-code)
 
 <br/>
 
@@ -26,15 +26,84 @@
 
 ---
 
-## ⚡ Three steps. One orchestrated run.
+## ✨ Why it feels different
+
+<table>
+<tr>
+<td width="50%">
+
+### New project or existing repo
+
+Start from a blank idea or point Orchestra at a real repository you already maintain. `Existing Project` mode audits first, then applies surgical changes instead of rewriting the app.
+
+</td>
+<td width="50%">
+
+### Real browser QA, not fake confidence
+
+The `visual_tester` agent opens the live app with Playwright, clicks controls, types into forms, checks console errors, captures screenshots, and blocks the run when something looks interactive but does nothing.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### Feedback loops instead of dead ends
+
+Quality gates do not just complain. They route structured fix briefs back to `developer`, retry with their own budgets, and keep the project moving instead of forcing a full restart.
+
+</td>
+<td width="50%">
+
+### Built for real local workflows
+
+Works on macOS, Windows, and Linux. Runs from a global npm install, opens a local dashboard, tracks cost, stores run memory, and cleans up temporary listeners after verification.
+
+</td>
+</tr>
+</table>
+
+---
+
+## ⚡ Start in 30 seconds
 
 ```bash
-npm install -g orchestra-ai-app   # 1. install once
-orchestra-ai                      # 2. run
-# 3. choose New Project or Existing Project in the browser
+npm install -g orchestra-ai-app@latest
+orchestra-ai
 ```
 
-A browser window opens automatically. Choose the mode, tune models if you want, and watch the live dashboard as the agents move through the run.
+Then:
+
+1. Choose `New Project` or `Existing Project`
+2. Pick your main model and optional cheaper subagent model
+3. Watch the live pipeline, intervene if needed, and inspect the final verified report
+
+Update later with:
+
+```bash
+npm install -g orchestra-ai-app@latest
+```
+
+---
+
+## 🖼️ What the product looks like
+
+| | |
+|---|---|
+| ![New Project — describe your idea](assets/screenshots/new-project.jpeg) | ![Agent configuration and model selection](assets/screenshots/new-project-model.jpeg) |
+
+| | |
+|---|---|
+| **Brief the run** | **Tune models and controls** |
+| Start from a raw idea or give Orchestra an existing repo path, constraints, and commands. | Pick main vs subagent models, budget, git behavior, and project mode before launching the run. |
+
+The dashboard is the product, not a loading screen:
+
+- hub-and-spoke pipeline with live agent activation
+- streamed output and structured events while work is happening
+- per-agent cost and token tracking
+- history, recovery, and continue-from-session support
+- final result card with verified local URL and report path
 
 ---
 
