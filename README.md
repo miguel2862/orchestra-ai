@@ -96,61 +96,192 @@ flowchart TD
 
 ## 🤖 The 9 agents — who does what
 
-| Agent | Phase | Role | Key tools |
-|-------|:-----:|------|-----------|
-| 🧠 **Product Manager** | `0 · Plan` | Clarifies scope and writes a full Product Requirements Doc | Memory, Web Search |
-| 🏛️ **Architect** | `1 · Design` | Chooses tech stack, designs folder structure, plans APIs | Web Search, Memory |
-| 💻 **Developer** | `2 · Build ⭐` | **Writes all the code.** The hub — receives from Architect, routes feedback from all quality agents | Filesystem, Search, Memory |
-| 🗄️ **Database** | `2 · Build` | Designs schema, writes migrations, seeds (only when the project needs a DB) | Filesystem, Postgres |
-| 🔍 **Error Checker** | `3 · Quality` | Scans for TypeScript errors, syntax bugs, missing imports, runtime crashes | Filesystem |
-| 🔒 **Security** | `3 · Quality` | Finds injection flaws, insecure auth, exposed secrets, known CVEs | Web Search, Filesystem |
-| 🧪 **Tester** | `3 · Quality` | Writes and runs unit & integration tests, reports coverage | Filesystem, Browser |
-| 👁️ **Reviewer** | `3 · Quality` | Reviews code patterns, readability, coupling, and best practices | Filesystem |
-| 🚀 **Deployer** | `4 · Ship` | Starts the app, hits real endpoints, verifies it responds correctly | Browser, Filesystem |
+Nine specialists. Five phases. One goal: working software you can run immediately.
 
-> **Phase 3 quality agents run in parallel.** They all check the same codebase simultaneously and independently route feedback to Developer.
+---
+
+### `Phase 0` · Plan
+
+<table>
+<tr>
+<td width="60"><h3>🧠</h3></td>
+<td>
+
+**Product Manager**
+
+Receives your raw idea and produces a complete **Product Requirements Document** — user stories, acceptance criteria, scope boundaries, edge cases, and a definition of done. Every downstream agent reads this first. Nothing gets built before the spec is tight.
+
+`Produces` → `PRD.md` &nbsp;&nbsp; `Tools` → Web Search · Memory
+
+</td>
+</tr>
+</table>
+
+---
+
+### `Phase 1` · Design
+
+<table>
+<tr>
+<td width="60"><h3>🏛️</h3></td>
+<td>
+
+**Architect**
+
+Reads the PRD and decides *how* to build it. Picks the tech stack, designs the full folder structure, defines API contracts between services, specifies data models, and writes every architectural decision with its rationale. Developer follows this blueprint exactly.
+
+`Produces` → `ARCHITECTURE.md` &nbsp;&nbsp; `Tools` → Web Search · Memory
+
+</td>
+</tr>
+</table>
+
+---
+
+### `Phase 2` · Build
+
+<table>
+<tr>
+<td width="60"><h3>💻</h3></td>
+<td>
+
+**Developer** ⭐ *Hub*
+
+The center of the star. Reads PRD + architecture and writes every source file. Also receives structured fix reports from all four quality agents and applies targeted corrections — without rewriting what already works. The only agent that writes production code.
+
+`Produces` → All source files &nbsp;&nbsp; `Tools` → Filesystem · Bash · Web Search · Memory
+
+</td>
+</tr>
+<tr>
+<td width="60"><h3>🗄️</h3></td>
+<td>
+
+**Database** *(conditional)*
+
+Activated only when the project needs persistent storage. Designs the full schema, writes migrations, creates seed data, and sets up connection pooling. Runs alongside Developer in Phase 2 so both finish before quality gates begin.
+
+`Produces` → Schema · migrations · seeds &nbsp;&nbsp; `Tools` → Filesystem · Postgres
+
+</td>
+</tr>
+</table>
+
+---
+
+### `Phase 3` · Quality *(agents run in parallel)*
+
+All four quality agents inspect the same codebase simultaneously. Each one routes its findings directly back to Developer as a structured report — *what broke, where, why, and what to fix.* Developer applies the fix; the agent re-checks. Independent retry budgets mean one gate's retries don't consume another's.
+
+<table>
+<tr>
+<td width="60"><h3>🔍</h3></td>
+<td>
+
+**Error Checker**
+
+Runs the TypeScript compiler, traces imports, checks for missing dependencies, and identifies runtime crashes before they happen. First gate to run — catches the most obvious blockers so the other agents aren't reviewing broken code.
+
+`Triggers feedback when` → type errors · missing imports · runtime exceptions &nbsp;&nbsp; `Max retries` → **3** &nbsp;&nbsp; `Tools` → Filesystem
+
+</td>
+</tr>
+<tr>
+<td width="60"><h3>🔒</h3></td>
+<td>
+
+**Security**
+
+Audits for injection vulnerabilities, insecure authentication, exposed credentials, OWASP Top 10 issues, and known CVEs in dependencies. Produces a risk-rated report; only critical and high-severity findings trigger a feedback loop.
+
+`Triggers feedback when` → critical vulnerability detected &nbsp;&nbsp; `Max retries` → **2** &nbsp;&nbsp; `Tools` → Web Search · Filesystem
+
+</td>
+</tr>
+<tr>
+<td width="60"><h3>🧪</h3></td>
+<td>
+
+**Tester**
+
+Writes unit and integration tests, then runs them. Reports coverage, identifies untested paths, and sends failing test output back to Developer with exact reproduction steps. Code doesn't pass this gate until the test suite is green.
+
+`Triggers feedback when` → any test is failing &nbsp;&nbsp; `Max retries` → **3** &nbsp;&nbsp; `Tools` → Filesystem · Browser
+
+</td>
+</tr>
+<tr>
+<td width="60"><h3>👁️</h3></td>
+<td>
+
+**Reviewer**
+
+Final code review by a senior engineer perspective: correctness, performance, maintainability, dead code, DRY violations, and cross-file reference analysis. Fixes critical issues directly; documents the rest in `CODE_REVIEW.md`.
+
+`Triggers feedback when` → blocker or critical issue found &nbsp;&nbsp; `Max retries` → **3** &nbsp;&nbsp; `Tools` → Filesystem
+
+</td>
+</tr>
+</table>
+
+---
+
+### `Phase 4` · Ship
+
+<table>
+<tr>
+<td width="60"><h3>🚀</h3></td>
+<td>
+
+**Deployer**
+
+Writes the `Dockerfile`, `docker-compose.yml`, CI/CD workflows, and `.env.example`. Then starts the app and hits real endpoints with HTTP requests to verify it responds correctly. If the app won't start, it sends a structured crash report back to Developer and retries.
+
+`Triggers feedback when` → app fails to start · endpoints don't respond &nbsp;&nbsp; `Max retries` → **2** &nbsp;&nbsp; `Tools` → Browser · Filesystem
+
+`Produces` → `Dockerfile` · `docker-compose.yml` · `.github/workflows/` · `README.md`
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## 🔄 Automatic feedback loops
 
-When a quality agent finds a problem, it sends Developer a structured report — *what broke, where, why, and what to fix.* Developer fixes it. The quality agent re-checks.
+When a quality agent finds a problem, it doesn't just report it — it sends Developer a structured fix brief: *what broke, the exact file and line, why it matters, and what to do.* Developer applies a targeted fix. The quality agent re-checks. This cycle repeats until the gate passes or retries run out.
 
 ```
-  Quality agent ──── ❌ issue report ────► Developer ──── fix ────► Quality agent re-checks
-       ▲                                                                       │
-       └───────────────────── up to N retries ───────────────────────────────┘
+Quality agent finds issue
+        │
+        ▼
+  Structured report ──────────────────────► Developer
+  (file · line · why · what to fix)               │
+        ▲                                          │ targeted fix
+        │                                          ▼
+        └──────────────────── re-check ◄─── Quality agent
 ```
 
-| Quality gate | Triggers when… | Max retries |
-|---|---|:---:|
-| 🔍 **Error Checker** | TypeScript errors, syntax errors, runtime exceptions | **3** |
-| 🧪 **Tester** | Any unit or integration test is failing | **3** |
-| 🔒 **Security** | A critical vulnerability is detected | **2** |
-| 👁️ **Reviewer** | A critical code quality issue is flagged | **3** |
-| 🚀 **Deployer** | The app fails to start or endpoints don't respond | **2** |
+> Retry budgets are **per quality gate** — independent of each other. Error Checker using all 3 of its retries doesn't affect Tester's 3 retries.
 
-**When retries are exhausted:** if issues remain after the last retry, the pipeline continues to the next phase rather than stopping the entire build. The unresolved issues are recorded in the run log (`.orchestra/run_*.json` inside the project folder) so you can review exactly what was found and what couldn't be fully resolved.
-
-> **No manual intervention is needed at any point.** Even partial results are almost always a working base — usually a single targeted fix is all that's left.
+**When retries are exhausted:** the pipeline continues rather than stopping. Unresolved issues are recorded in `.orchestra/run_*.json` so you can see exactly what was found, what was attempted, and what remains — usually a small targeted fix away from done.
 
 ---
 
 ## 🖥️ Live dashboard
 
-After running `orchestra-ai`, your browser opens automatically. You get a real-time view of everything happening:
+Run `orchestra-ai` and your browser opens automatically. You're not watching a spinner — you're watching the orchestra work.
 
+| What you see | Details |
+|---|---|
+| **Hub-and-spoke visualization** | The star topology rendered live — each agent node lights up as it activates, feedback arrows animate in amber when a loop triggers |
+| **Live output stream** | Every action, decision, and file written by each agent — streamed line by line in real time |
+| **Per-agent cost tracker** | Token count and USD for each agent, updating as they run — see exactly which agent is expensive |
+| **Intervention chat** | Send a message to a running agent mid-execution without stopping the run |
+| **Result card** | Clickable `localhost` URL the moment your app is live |
+| **Full run history** | Every past project saved — browse event logs, cost breakdowns, and agent stats |
 
-| Feature | What you see |
-|---------|-------------|
-| **Hub-and-spoke visualization** | The star topology rendered live — agents light up as they activate |
-| **Live output stream** | Every line each agent writes, thinks, and decides — in real time |
-| **Cost tracker** | Token count and USD per agent, updating as they run |
-| **Feedback loop arrows** | Animated amber arrows when a quality gate loops back to Developer |
-| **Result card** | Clickable `localhost` URL when your app is ready |
-| **History** | Every past run saved — browse previous projects and their full event logs |
-
-> Port defaults to **3847** but auto-reassigns if busy. You can **run multiple projects simultaneously** — each is tracked independently with its own event stream.
+> Defaults to port **3847**, auto-reassigns if busy. Run multiple projects simultaneously — each has its own independent event stream and cost tracker.
 
 ---
 
