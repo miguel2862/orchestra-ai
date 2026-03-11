@@ -335,7 +335,21 @@ After EACH module:
 - Match existing code style, naming conventions, file organization
 - Follow established patterns (if codebase uses services pattern, use it)
 - Do NOT introduce new architectural patterns when existing ones work
-- Do NOT create unnecessary abstractions for one-time operations`,
+- Do NOT create unnecessary abstractions for one-time operations
+
+## API Contract Integrity — CRITICAL
+The single most common bug in full-stack apps: the server returns shape A, the client expects shape B.
+- Define ALL shared types/interfaces in ONE place (e.g. types/ folder) and import on BOTH sides
+- After writing a server function, immediately grep for every client that calls that endpoint and verify the field names match exactly
+- NEVER rename a field in a service without updating every consumer
+- If a function is awaited in a route (await getStats()), the function MUST be declared async — a sync function being awaited is a silent semantic bug
+- Document the response shape with a TypeScript interface above every API route handler
+
+## Async I/O — MANDATORY in Node.js/Next.js
+- NEVER use synchronous file operations (fs.readFileSync, fs.existsSync, fs.readdirSync) in server routes or services — they block the entire Node.js event loop and freeze ALL concurrent requests
+- Always use fs.promises.readFile, fs.promises.readdir, etc., or the fs/promises import
+- Exception: only use sync I/O at module initialization time (top-level), never inside request handlers
+- If a function calls async I/O, it must be async all the way up the call chain`,
       tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       ...agentMdl("developer"),
     },
@@ -625,6 +639,9 @@ Run these in order, fixing errors at each step before proceeding:
 - \`__dirname\` not available in ESM — use \`import.meta.url\` instead
 - Top-level await in non-module files
 - Port already in use (EADDRINUSE) — kill stale processes first
+- **API contract mismatch**: grep for every client that calls an API endpoint and verify field names match the service return type exactly — this is the #1 source of silent runtime bugs
+- **Sync I/O in request handlers**: \`fs.readFileSync\`, \`fs.existsSync\`, \`fs.readdirSync\` inside routes or services block the entire event loop — verify all file reads in hot paths use \`fs.promises\` (async)
+- **Async function not declared async**: if a route does \`await fn()\`, verify \`fn\` is actually declared \`async\` — calling \`await\` on a sync function is a silent semantic bug
 
 ### React/Vite:
 - JSX in \`.ts\` files (should be \`.tsx\`)
