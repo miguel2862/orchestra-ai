@@ -30,118 +30,109 @@
   <!-- Background -->
   <rect width="900" height="280" fill="url(#bgGrad)" rx="16"/>
 
-  <!-- Ambient glow -->
-  <ellipse cx="450" cy="105" rx="180" ry="70" fill="#7c3aed" opacity="0.06">
-    <animate attributeName="opacity" values="0.04;0.09;0.04" dur="4s" repeatCount="indefinite"/>
+  <!-- Ambient glow behind logo area -->
+  <ellipse cx="450" cy="90" rx="220" ry="60" fill="#7c3aed" opacity="0.05">
+    <animate attributeName="opacity" values="0.03;0.08;0.03" dur="4s" repeatCount="indefinite"/>
   </ellipse>
 
   <!-- Separator line -->
-  <rect x="100" y="180" width="700" height="1" fill="url(#lineGrad)">
+  <rect x="100" y="175" width="700" height="1" fill="url(#lineGrad)">
     <animate attributeName="opacity" values="0.4;0.8;0.4" dur="3s" repeatCount="indefinite"/>
   </rect>
 
-  <!-- Static music note icon (no rotation — the particles are what move) -->
-  <g transform="translate(383, 68)" filter="url(#noteGlow)">
-    <path d="M9 18V5l12-2v13" stroke="url(#violetGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    <circle cx="6" cy="18" r="3" stroke="url(#violetGrad)" stroke-width="2.5" fill="none"/>
-    <circle cx="18" cy="16" r="3" stroke="url(#violetGrad)" stroke-width="2.5" fill="none"/>
+  <!-- ═══ LOGO ROW: note icon + "Orchestra AI" side by side (matching the app) ═══ -->
+
+  <!-- Music note icon — positioned to the LEFT of text -->
+  <g transform="translate(322, 58) scale(1.6)" filter="url(#noteGlow)">
+    <path d="M9 18V5l12-2v13" stroke="url(#violetGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="6" cy="18" r="3" stroke="url(#violetGrad)" stroke-width="2" fill="none"/>
+    <circle cx="18" cy="16" r="3" stroke="url(#violetGrad)" stroke-width="2" fill="none"/>
   </g>
 
-  <!-- ═══ FLOATING PARTICLES — notes rising up and fading out ═══ -->
-  <!-- Like the app: they spawn near the icon, float upward, drift sideways, and disappear -->
-
-  <!-- ♪ rises up-left, fades -->
-  <text font-size="16" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♪
+  <!-- Floating particles rising from the note icon area -->
+  <!-- ♪ up-left -->
+  <text font-size="15" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♪
     <animate attributeName="opacity" values="0;0.9;0.8;0" dur="2.2s" begin="0s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="86;40" dur="2.2s" begin="0s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="382;368" dur="2.2s" begin="0s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="72;28" dur="2.2s" begin="0s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="338;324" dur="2.2s" begin="0s" repeatCount="indefinite"/>
   </text>
 
-  <!-- ♫ rises up-right, fades -->
-  <text font-size="14" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♫
+  <!-- ♫ up-right -->
+  <text font-size="13" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♫
     <animate attributeName="opacity" values="0;0.85;0.7;0" dur="2.2s" begin="0.6s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="80;36" dur="2.2s" begin="0.6s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="412;428" dur="2.2s" begin="0.6s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="66;24" dur="2.2s" begin="0.6s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="360;378" dur="2.2s" begin="0.6s" repeatCount="indefinite"/>
   </text>
 
-  <!-- ♬ rises up-left -->
-  <text font-size="15" fill="#818cf8" opacity="0" font-family="serif" filter="url(#glow)">♬
+  <!-- ♬ up-left -->
+  <text font-size="14" fill="#818cf8" opacity="0" font-family="serif" filter="url(#glow)">♬
     <animate attributeName="opacity" values="0;0.9;0.7;0" dur="2.2s" begin="2.8s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="84;38" dur="2.2s" begin="2.8s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="376;358" dur="2.2s" begin="2.8s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="70;26" dur="2.2s" begin="2.8s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="332;316" dur="2.2s" begin="2.8s" repeatCount="indefinite"/>
   </text>
 
-  <!-- ♩ rises up-right -->
-  <text font-size="13" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♩
+  <!-- ♩ up-right -->
+  <text font-size="12" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♩
     <animate attributeName="opacity" values="0;0.8;0.6;0" dur="2.2s" begin="3.4s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="78;34" dur="2.2s" begin="3.4s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="418;436" dur="2.2s" begin="3.4s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="64;22" dur="2.2s" begin="3.4s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="356;372" dur="2.2s" begin="3.4s" repeatCount="indefinite"/>
   </text>
 
-  <!-- ♪ rises center-left -->
-  <text font-size="12" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♪
+  <!-- ♪ up-left (third burst) -->
+  <text font-size="11" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♪
     <animate attributeName="opacity" values="0;0.75;0.5;0" dur="2.2s" begin="5.6s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="82;40" dur="2.2s" begin="5.6s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="390;374" dur="2.2s" begin="5.6s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="74;32" dur="2.2s" begin="5.6s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="342;328" dur="2.2s" begin="5.6s" repeatCount="indefinite"/>
   </text>
 
-  <!-- ♫ rises center-right -->
-  <text font-size="14" fill="#818cf8" opacity="0" font-family="serif" filter="url(#glow)">♫
+  <!-- ♫ up-right (third burst) -->
+  <text font-size="13" fill="#818cf8" opacity="0" font-family="serif" filter="url(#glow)">♫
     <animate attributeName="opacity" values="0;0.85;0.65;0" dur="2.2s" begin="6.2s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="76;32" dur="2.2s" begin="6.2s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="406;422" dur="2.2s" begin="6.2s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="68;26" dur="2.2s" begin="6.2s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="354;370" dur="2.2s" begin="6.2s" repeatCount="indefinite"/>
   </text>
 
-  <!-- ♬ rises far left -->
-  <text font-size="11" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♬
-    <animate attributeName="opacity" values="0;0.7;0.4;0" dur="2.2s" begin="8.4s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="88;44" dur="2.2s" begin="8.4s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="370;352" dur="2.2s" begin="8.4s" repeatCount="indefinite"/>
-  </text>
-
-  <!-- ♩ rises far right -->
-  <text font-size="13" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♩
-    <animate attributeName="opacity" values="0;0.8;0.55;0" dur="2.2s" begin="9.0s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="80;36" dur="2.2s" begin="9.0s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="420;440" dur="2.2s" begin="9.0s" repeatCount="indefinite"/>
-  </text>
-
-  <!-- ═══ Title with breathing ═══ -->
-  <text x="450" y="125" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="700" font-size="42" fill="url(#violetGrad)" filter="url(#glow)">
+  <!-- "Orchestra AI" text — to the RIGHT of the note icon -->
+  <text x="410" y="96" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="700" font-size="46" fill="url(#violetGrad)" filter="url(#glow)">
     Orchestra AI
     <animate attributeName="opacity" values="1;0.85;1" dur="3s" repeatCount="indefinite"/>
   </text>
 
   <!-- Subtitle -->
-  <text x="450" y="158" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="400" font-size="16" fill="#a3a3a3" letter-spacing="0.5">
-    From idea to verified app — powered by 10 AI agents
+  <text x="450" y="145" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="400" font-size="15" fill="#a3a3a3" letter-spacing="0.5">
+    From idea to verified app — one command, ten AI agents
   </text>
 
   <!-- Badges -->
-  <g transform="translate(255, 200)">
+  <g transform="translate(255, 195)">
     <rect width="78" height="26" rx="13" fill="#7c3aed" opacity="0.15" stroke="#7c3aed" stroke-opacity="0.3" stroke-width="1"/>
     <text x="39" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#c084fc" font-weight="500">npm v0.4.0</text>
   </g>
-  <g transform="translate(345, 200)">
+  <g transform="translate(345, 195)">
     <rect width="80" height="26" rx="13" fill="#10b981" opacity="0.12" stroke="#10b981" stroke-opacity="0.25" stroke-width="1"/>
     <text x="40" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6ee7b7" font-weight="500">Node &gt;=18</text>
   </g>
-  <g transform="translate(437, 200)">
+  <g transform="translate(437, 195)">
     <rect width="52" height="26" rx="13" fill="#3b82f6" opacity="0.12" stroke="#3b82f6" stroke-opacity="0.25" stroke-width="1"/>
     <text x="26" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#93c5fd" font-weight="500">MIT</text>
   </g>
-  <g transform="translate(501, 200)">
+  <g transform="translate(501, 195)">
     <rect width="145" height="26" rx="13" fill="#6366f1" opacity="0.12" stroke="#6366f1" stroke-opacity="0.25" stroke-width="1"/>
     <text x="72" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#a5b4fc" font-weight="500">macOS / Win / Linux</text>
   </g>
 
   <!-- Ambient dots -->
-  <circle cx="160" cy="100" r="1.5" fill="#a78bfa" opacity="0.2">
+  <circle cx="160" cy="90" r="1.5" fill="#a78bfa" opacity="0.2">
     <animate attributeName="opacity" values="0.1;0.35;0.1" dur="2.5s" repeatCount="indefinite"/>
   </circle>
-  <circle cx="740" cy="100" r="1.5" fill="#a78bfa" opacity="0.2">
+  <circle cx="780" cy="90" r="1.5" fill="#a78bfa" opacity="0.2">
     <animate attributeName="opacity" values="0.1;0.35;0.1" dur="2.5s" begin="1.2s" repeatCount="indefinite"/>
   </circle>
+
+  <!-- Install hint -->
+  <text x="450" y="252" text-anchor="middle" font-family="'SF Mono', 'Cascadia Code', 'Fira Code', monospace" font-size="13" fill="#737373">
+    npm install -g orchestra-ai-app@latest &amp;&amp; orchestra-ai
+  </text>
 
   <!-- Bottom glow -->
   <rect x="0" y="276" width="900" height="4" rx="2" fill="url(#lineGrad)">

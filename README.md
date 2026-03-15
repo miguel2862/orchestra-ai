@@ -4,11 +4,6 @@
 
 <br/>
 
-**One command. Ten AI agents. From raw idea to browser-verified app.**<br/>
-**New projects or existing repos — Orchestra handles both.**
-
-<br/>
-
 [<img src="https://img.shields.io/npm/v/orchestra-ai-app?color=7c3aed&label=npm&logo=npm&logoColor=white&style=for-the-badge" alt="npm"/>](https://www.npmjs.com/package/orchestra-ai-app)
 [<img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?logo=node.js&logoColor=white&style=for-the-badge" alt="Node"/>](https://nodejs.org)
 [<img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="License"/>](LICENSE)
@@ -16,9 +11,8 @@
 
 <br/>
 
-```bash
-npm install -g orchestra-ai-app@latest && orchestra-ai
-```
+**Describe a new product or point Orchestra at an existing repo.**<br/>
+**Up to 13 specialized agents plan, build in parallel, review, deploy, and QA in a real browser.**
 
 <br/>
 
@@ -39,9 +33,9 @@ Start from a blank idea or point Orchestra at a real repository. `Existing Proje
 </td>
 <td width="50%">
 
-### Real browser QA, not fake confidence
+### Parallel developers for big projects
 
-The `visual_tester` agent opens the live app with Playwright, clicks controls, types into forms, checks console errors, captures screenshots, and blocks the run when something looks interactive but does nothing.
+When the Architect defines multiple modules, Orchestra launches **N developer agents in parallel** — each scoped to its own files — then an Integrator wires everything together. Small projects still use a single developer.
 
 </td>
 </tr>
@@ -50,14 +44,14 @@ The `visual_tester` agent opens the live app with Playwright, clicks controls, t
 
 ### Feedback loops instead of dead ends
 
-Quality gates route structured fix briefs back to `developer`, retry with their own budgets, and keep the project moving instead of forcing a full restart.
+Quality gates route structured fix briefs back to the right developer (by module), retry with independent budgets, and keep the project moving instead of forcing a full restart.
 
 </td>
 <td width="50%">
 
-### Built for real local workflows
+### Real browser QA, not fake confidence
 
-Works on macOS, Windows, and Linux. Runs from a global npm install, opens a local dashboard, tracks cost, stores run memory, and cleans up temporary listeners after verification.
+The `visual_tester` agent opens the live app with Playwright, clicks controls, types into forms, checks console errors, captures screenshots, and blocks the run when something looks interactive but does nothing.
 
 </td>
 </tr>
@@ -79,19 +73,50 @@ Works on macOS, Windows, and Linux. Runs from a global npm install, opens a loca
 The dashboard is the product, not a loading screen:
 
 - Hub-and-spoke pipeline with live agent activation and animated feedback loops
-- Streamed output and structured events while work is happening
+- **Dynamic pipeline visualization** — shows N parallel developer nodes when modules are detected
+- Streamed output and structured events in real time
 - Per-agent cost and token tracking with AnimeJS animations
-- History, recovery, and continue-from-session support
 - Claude usage panel with live subscription limits (session + weekly windows)
-- Light and dark themes
+- History, recovery, and continue-from-session support
+- Light and dark themes with premium glass-morphism design
 
 <img src="assets/divider.svg" width="100%" alt=""/>
 
-## Architecture — controlled graph, not a blind pipeline
+## Architecture — parallel developers, not a single bottleneck
 
-Most AI coding tools run agents in a straight line: A → B → C → D. If D fails, the build stops.
+Most AI coding tools run one agent that writes everything sequentially. If the project is large, the context window fills up and quality drops.
 
-**Orchestra is different.** The **Developer** sits at the center of a star. Quality gates branch out, loop back with structured fix briefs when they fail, and only continue to deploy and browser QA when everything passes.
+**Orchestra v0.4.0 introduces parallel module development:**
+
+```
+          Architect defines N modules
+                    ↓
+        Developer:Foundation
+        (creates shared types, configs, layouts)
+                    ↓
+    ┌──── Developer:Module1 ────┐
+    ├──── Developer:Module2 ────┤  ← run in parallel
+    ├──── Developer:Module3 ────┤
+    └──── Developer:ModuleN ────┘
+                    ↓
+              Integrator
+        (wires modules, fixes cross-module issues,
+         verifies build passes as a unit)
+                    ↓
+          Quality gates → Deploy → Visual QA
+```
+
+**Three layers prevent file conflicts:**
+
+1. **Foundation Developer** runs first — creates all shared files (types, configs, layouts, utils). Module developers only import from these, never modify them.
+2. **Strict scope** — each module developer receives an exact file list from the Architect. The prompt says "do NOT modify files outside your scope."
+3. **Integrator** runs after all parallels — reads everything, fixes incompatibilities, wires routes/navigation, and verifies `tsc --noEmit` + `npm run build` pass.
+
+> **Fallback:** if the Architect doesn't define modules (small project), Orchestra uses a single Developer — exactly like before.
+
+<img src="assets/divider.svg" width="100%" alt=""/>
+
+## Full pipeline
 
 ```mermaid
 flowchart TD
@@ -102,90 +127,165 @@ flowchart TD
     PM["🧠 Product Manager\nPRD or delta change plan"]
     PM --> ARCH
 
-    ARCH["🏛️ Architect\nSystem design or architecture delta"]
-    ARCH --> DEV
+    ARCH["🏛️ Architect\nSystem design + module breakdown"]
+    ARCH --> FDEV
 
-    DEV["💻 Developer\n\n  ★  HUB  ★\n\nWrites production code\nand applies targeted fixes"]
+    FDEV["🔧 Foundation Developer\nShared types, configs, layouts"]
+    FDEV --> DEV1
+    FDEV --> DEV2
+    FDEV --> DEVN
 
-    DEV --> EC
-    DEV --> SEC
-    DEV --> TEST
-    DEV --> REV
-    DEV -.- DB[("🗄️ Database\noptional")]
+    DEV1["💻 Developer:Module1\nScoped to module files"]
+    DEV2["💻 Developer:Module2\nScoped to module files"]
+    DEVN["💻 Developer:ModuleN\nScoped to module files"]
+
+    DEV1 --> INT
+    DEV2 --> INT
+    DEVN --> INT
+
+    INT["🔗 Integrator\nWire modules, verify build"]
+
+    INT --> EC
+    INT --> SEC
+    INT --> TEST
+    INT --> REV
+    INT -.- DB[("🗄️ Database\noptional")]
 
     EC["🔍 Error Checker\nBuild, lint, type, runtime"]
     SEC["🔒 Security\nVulnerabilities & hardening"]
     TEST["🧪 Tester\nRegression, unit, integration"]
     REV["👁️ Reviewer\nFinal engineering review"]
 
-    EC -.->|"❌ issues found — retry × 3"| DEV
-    SEC -.->|"❌ critical/high risk — retry × 2"| DEV
-    TEST -.->|"❌ tests fail — retry × 3"| DEV
-    REV -.->|"❌ blocker found — retry × 3"| DEV
+    EC -.->|"❌ retry × 3"| INT
+    SEC -.->|"❌ retry × 2"| INT
+    TEST -.->|"❌ retry × 3"| INT
+    REV -.->|"❌ retry × 3"| INT
 
     EC --> DEPLOY
     SEC --> DEPLOY
     TEST --> DEPLOY
     REV --> DEPLOY
 
-    DEPLOY["🚀 Deployer\nStart app, verify locally,\nprepare final report"]
-    DEPLOY -.->|"❌ won't start — retry × 2"| DEV
+    DEPLOY["🚀 Deployer\nStart app, verify locally"]
+    DEPLOY -.->|"❌ retry × 2"| INT
     DEPLOY --> VIS
 
     VIS["🖥️ Visual Tester\nReal browser QA with Playwright"]
-    VIS -.->|"❌ dead controls / console / UX bugs — retry × 3"| DEV
+    VIS -.->|"❌ retry × 3"| INT
     VIS --> DONE(["✅ Verified app"])
 
-    style DEV fill:#4c1d95,color:#e9d5ff,stroke:#7c3aed,stroke-width:3px
+    style FDEV fill:#1e3a5f,color:#bfdbfe,stroke:#3b82f6,stroke-width:2px
+    style DEV1 fill:#4c1d95,color:#e9d5ff,stroke:#7c3aed,stroke-width:2px
+    style DEV2 fill:#4c1d95,color:#e9d5ff,stroke:#7c3aed,stroke-width:2px
+    style DEVN fill:#4c1d95,color:#e9d5ff,stroke:#7c3aed,stroke-width:2px
+    style INT fill:#1e3a5f,color:#bfdbfe,stroke:#3b82f6,stroke-width:2px
     style DONE fill:#064e3b,color:#d1fae5,stroke:#10b981,stroke-width:2px
     style IDEA fill:#1e3a5f,color:#bfdbfe,stroke:#3b82f6,stroke-width:2px
 ```
 
-> **Solid arrows** → forward pass (planned phases).
-> **Dashed arrows** → feedback loops (automatic, only triggered when issues are found).
+> **Solid arrows** → forward pass. **Dashed arrows** → feedback loops (automatic retries).
+> For small projects without modules, the Foundation/Module/Integrator layer collapses into a single Developer.
 
 <img src="assets/divider.svg" width="100%" alt=""/>
 
-## The 10 agents — 9 core + 1 conditional
+## The agents — up to 13 depending on project complexity
 
-Nine required agents run on every project. The tenth, `database`, joins when the project needs persistence.
+Nine core agents run on every project. Up to four more join dynamically: Database (when persistence is needed), Foundation Developer, N Module Developers, and Integrator (when the Architect defines modules).
 
 ### Phase 0 · Plan
 
 | | |
 |:---:|---|
-| 🧠 | **Product Manager** — receives your raw idea and produces a complete PRD. In `Existing Project` mode it starts with a repo audit and writes the PRD as a delta change plan. |
+| 🧠 | **Product Manager** — receives your raw idea and produces a complete PRD. In `Existing Project` mode it starts with a repo audit and writes the PRD as a delta change plan. `Tools:` Web Search · Web Fetch |
 
 ### Phase 1 · Design
 
 | | |
 |:---:|---|
-| 🏛️ | **Architect** — reads the PRD and decides *how* to build it. For greenfield work it designs the full system. For existing repos it writes the minimal architecture delta. |
+| 🏛️ | **Architect** — reads the PRD and designs the system. For large projects, it also produces a `<!-- MODULES -->` block in ARCHITECTURE.md that defines independent modules with scoped file lists. This triggers parallel development. `Tools:` Filesystem · Web Search |
 
 ### Phase 2 · Build
 
+This phase adapts to project size:
+
+**Small projects (no modules defined):**
+
 | | |
 |:---:|---|
-| 💻 | **Developer** ⭐ *Hub* — the center of the star. Writes production code and receives structured fix reports from quality agents. If Gemini is configured, can generate project-specific assets on demand. |
-| 🗄️ | **Database** *(conditional)* — activated only when the project needs persistent storage. Designs schema, migrations, indexes, and seeds. |
+| 💻 | **Developer** — single agent that reads PRD + architecture and writes all production code. Also receives fix reports from quality gates. `Tools:` Filesystem · Bash |
+
+**Large projects (modules defined by Architect):**
+
+| | |
+|:---:|---|
+| 🔧 | **Foundation Developer** — runs FIRST, before any module developer. Creates all shared files: types, configs, layouts, navigation, utilities, and installs dependencies. `Tools:` Filesystem · Bash |
+| 💻 | **Developer:Module1…N** — N agents launched IN PARALLEL, each scoped to a specific module's files. They import from Foundation's shared files but never modify them. `Tools:` Filesystem · Bash |
+| 🔗 | **Integrator** — runs AFTER all module developers complete. Reads all code, fixes cross-module incompatibilities, wires routing/navigation, and verifies `tsc --noEmit` + `npm run build` pass. `Tools:` Filesystem · Bash |
+
+**Conditional:**
+
+| | |
+|:---:|---|
+| 🗄️ | **Database** — activated only when the project needs persistent storage. Designs schema, migrations, indexes, and seeds. `Tools:` Filesystem · Bash |
 
 ### Phase 3 · Quality Gates
 
-Quality agents inspect the codebase with independent retry budgets. Each routes findings back to Developer as a structured fix brief.
+Quality agents inspect the codebase with independent retry budgets. Each routes findings back as a structured fix brief. In parallel-dev mode, fixes are routed to the specific module's developer or to the Integrator for cross-module issues.
 
 | | | Retries |
 |:---:|---|:---:|
-| 🔍 | **Error Checker** — build, lint, typecheck, and runtime validation | ×3 |
-| 🔒 | **Security** — injection, auth, credentials, OWASP-style issues | ×2 |
-| 🧪 | **Tester** — regression, unit, and integration tests | ×3 |
-| 👁️ | **Reviewer** — final code review from a principal engineer perspective | ×3 |
+| 🔍 | **Error Checker** — build, lint, typecheck, runtime validation. Error Checker and Security run **in parallel**. | ×3 |
+| 🔒 | **Security** — injection, auth, credentials, OWASP-style issues. Runs **in parallel** with Error Checker. | ×2 |
+| 🧪 | **Tester** — regression, unit, and integration tests. Uses the repo's test framework for existing projects. | ×3 |
+| 👁️ | **Reviewer** — final code review: correctness, performance, maintainability, risky patterns. | ×3 |
 
 ### Phase 4 · Ship + Browser QA
 
 | | | Retries |
 |:---:|---|:---:|
-| 🚀 | **Deployer** — Dockerfile, CI/CD, starts app locally, verifies URL, writes `ORCHESTRA_REPORT.md` | ×2 |
-| 🖥️ | **Visual Tester** — real browser QA with Playwright: navigate, click, type, inspect console, capture screenshots | ×3 |
+| 🚀 | **Deployer** — writes Dockerfile, CI/CD, `.env.example`, starts app locally, verifies URL, writes `ORCHESTRA_REPORT.md`. Temporary listeners are cleaned up after the run finishes. | ×2 |
+| 🖥️ | **Visual Tester** — opens the running app in a real browser via Playwright MCP. Navigates routes, clicks controls, types into forms, inspects console, captures screenshots. Fails the run if interactive controls do nothing. | ×3 |
+
+<img src="assets/divider.svg" width="100%" alt=""/>
+
+## Automatic feedback loops
+
+When a quality gate finds a problem:
+
+```
+Quality gate finds issue
+        │
+        ▼
+  Structured report ──────────────────────► Developer (or Integrator)
+  (file · line · why · what to fix)               │
+        ▲                                          │ targeted fix
+        │                                          ▼
+        └──────────────────── re-check ◄──── Quality gate
+```
+
+- Retry budgets are **per gate** — Error Checker using all 3 retries doesn't consume Tester's
+- In parallel-dev mode, fixes are routed by file path to the **correct module's developer**, or to the **Integrator** if the issue is cross-module
+- When retries are exhausted, the pipeline continues — unresolved issues are recorded in `.orchestra/run_*.json`
+- **Hard artifact gates:** the run requires `PRD.md`, `ARCHITECTURE.md`, `VISUAL_TEST_REPORT.md`, and `ORCHESTRA_REPORT.md`
+
+<img src="assets/divider.svg" width="100%" alt=""/>
+
+## Live dashboard
+
+Run `orchestra-ai` and your browser opens automatically:
+
+| What you see | Details |
+|---|---|
+| **Dynamic pipeline visualization** | Shows the actual agents running — including N parallel developer nodes when modules are detected. Each node lights up as it activates and feedback arrows animate on loops. |
+| **Live output stream** | Actions, decisions, file writes, and verification steps streamed in real time |
+| **Per-agent cost tracker** | Token count and USD for each agent (including per-module developers), updating live |
+| **AnimeJS animations** | Staggered reveals, count-up numbers, fade-ins, and the animated logo with floating music notes |
+| **Claude usage panel** | Live session (5h) and weekly (7d) limits from Anthropic API + CodexBar fallback |
+| **Intervention chat** | Send a message to a running project without discarding context |
+| **History + recovery** | Past projects with stored events, cost breakdowns, and agent stats |
+| **Light + dark themes** | Premium glass-morphism design that adapts to system preference |
+
+> Defaults to port **3847**, auto-reassigns if busy. Multiple projects can run simultaneously.
 
 <img src="assets/divider.svg" width="100%" alt=""/>
 
@@ -212,11 +312,20 @@ orchestra-ai
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
-Then re-run `orchestra-ai`.
-
 </details>
 
-On first launch, a setup wizard runs automatically — auth method, API keys or Claude login, working directory, model defaults, MCP servers, and theme.
+On first launch, a setup wizard runs — auth method, API keys, working directory, model defaults, MCP servers, and theme.
+
+<img src="assets/divider.svg" width="100%" alt=""/>
+
+## Two modes
+
+| Mode | What Orchestra does |
+|------|----------------------|
+| **New Project** | Creates a fresh working directory, writes PRD and architecture from scratch, builds the app (single or parallel developers), deploys, and visually verifies |
+| **Existing Project** | Works in-place on a repo you provide, starts with a repo audit, writes a delta change plan, preserves repo conventions, uses your `start` / `test` / `lint` commands, focuses on surgical changes |
+
+For existing repos you can add a `.orchestrarc` file with stack guardrails, conventions, and timeout overrides.
 
 <img src="assets/divider.svg" width="100%" alt=""/>
 
@@ -224,35 +333,47 @@ On first launch, a setup wizard runs automatically — auth method, API keys or 
 
 ### With a Claude subscription
 
-**No extra token cost.** Orchestra uses your plan's built-in quota. The dashboard shows both limits live.
+**No extra token cost.** Orchestra uses your plan's built-in quota.
 
-| Plan | Price | Works? | Usage |
-|---|---|:---:|---|
-| **Claude Pro** | $20 / mo | ✅ | Included — lower limits |
-| **Claude Max 5×** | $100 / mo | ✅ | 5× more usage |
-| **Claude Max 20×** | $200 / mo | ✅ | 20× more usage |
-| **API key only** | Pay per token | ✅ | No limits |
+| Plan | Price | Works? |
+|---|---|:---:|
+| **Claude Pro** | $20 / mo | ✅ |
+| **Claude Max 5×** | $100 / mo | ✅ |
+| **Claude Max 20×** | $200 / mo | ✅ |
+| **API key only** | Pay per token | ✅ |
 
 ### With an API key
 
-| Model | Input | Output | Best for |
-|-------|------:|------:|---------|
-| **Opus 4.6** | $5 / 1M | $25 / 1M | Complex, long projects |
-| **Sonnet 4.6** | $3 / 1M | $15 / 1M | Recommended balance |
-| **Haiku 4.5** | $1 / 1M | $5 / 1M | Fastest, cheapest |
+| Model | Input | Output |
+|-------|------:|------:|
+| **Opus 4.6** | $5 / 1M | $25 / 1M |
+| **Sonnet 4.6** | $3 / 1M | $15 / 1M |
+| **Haiku 4.5** | $1 / 1M | $5 / 1M |
 
-A typical full-stack project on Sonnet 4.6: **$0.50 – $3.00**
+A typical full-stack project on Sonnet 4.6: **$0.50 – $3.00**. Parallel developers may increase cost slightly but reduce total time significantly.
 
-> Always verify current prices at [anthropic.com/pricing](https://www.anthropic.com/pricing).
+> Always verify at [anthropic.com/pricing](https://www.anthropic.com/pricing).
+
+<img src="assets/divider.svg" width="100%" alt=""/>
+
+## Port cleanup and process management
+
+Orchestra aggressively cleans up child processes and ports:
+
+- **On project stop** — kills all known port listeners + scans for any node/vite/npm/webpack process whose working directory matches the project
+- **On project delete** — automatically stops the project first (killing agents + cleaning ports) before removing metadata
+- **On server shutdown** (SIGTERM/SIGINT) — gracefully stops all active projects
+- **Second sweep** — 3 seconds after stop, a second cleanup pass catches late-binding processes
+- **Orphan detection** — finds processes by CWD match, not just tracked ports, catching grandchild processes that survive `q.close()`
 
 <img src="assets/divider.svg" width="100%" alt=""/>
 
 ## Configuration
 
-Everything is configurable from **Settings** in the web UI.
+Everything is configurable from **Settings** in the web UI. Config lives at `~/.orchestra-ai/config.json`.
 
 <details>
-<summary>Global settings</summary>
+<summary>All settings</summary>
 
 | Setting | Description |
 |---------|-------------|
@@ -263,15 +384,15 @@ Everything is configurable from **Settings** in the web UI.
 | Main model | Latest aliases or pinned snapshots |
 | Subagent model | Use a cheaper model for specialized gates |
 | Extended thinking | Deeper reasoning for harder projects |
-| Budget cap | Maximum USD spend per project |
+| Budget cap | Maximum USD per project |
 | Max turns | Hard limit on agent iterations |
 | Git auto-commits | Commit after completed phases |
 | UI theme | Light / Dark / System |
-| MCP servers | Per-server enable/disable in the UI |
+| MCP servers | Per-server enable/disable |
 
 </details>
 
-Repo-level overrides live in `.orchestrarc` inside the target repository:
+Repo-level overrides in `.orchestrarc`:
 
 ```json
 {
@@ -291,8 +412,6 @@ Repo-level overrides live in `.orchestrarc` inside the target repository:
 
 ## MCP Servers
 
-Orchestra uses the [Model Context Protocol](https://modelcontextprotocol.io) to give agents real tools:
-
 | Server | Capability |
 |--------|-----------|
 | `filesystem` | Read, write, edit, and navigate project files |
@@ -304,15 +423,14 @@ Orchestra uses the [Model Context Protocol](https://modelcontextprotocol.io) to 
 
 <img src="assets/divider.svg" width="100%" alt=""/>
 
-## Project templates
+## Learning and guardrails
 
-| Template | What it builds |
-|----------|----------------|
-| **Full-stack web app** | Frontend + backend with production setup |
-| **API backend** | REST or GraphQL API with auth and docs |
-| **Landing page** | Static marketing site |
-| **CLI tool** | Node.js command-line utility |
-| **Custom** | Describe anything in plain English |
+Orchestra keeps a self-learning store in `~/.orchestra-ai/lessons.json`:
+
+- Lessons are extracted from agent outputs, feedback loops, user feedback, and runtime-gate failures
+- Relevant lessons are injected into later prompts so repeated mistakes become less likely
+- Repo-level guardrails from `.orchestrarc` are merged for project-specific enforcement
+- Runtime gates remain the source of truth — learned behavior helps, but artifacts and browser evidence are required
 
 <img src="assets/divider.svg" width="100%" alt=""/>
 
@@ -320,17 +438,17 @@ Orchestra uses the [Model Context Protocol](https://modelcontextprotocol.io) to 
 
 ```
 my-project/
-├── src/                       # production code
+├── src/                       # production code (may span multiple modules)
 ├── tests/                     # tests by Tester agent
 ├── package.json
 ├── PRD.md                     # requirements / delta plan
-├── ARCHITECTURE.md            # system design
+├── ARCHITECTURE.md            # system design + module breakdown
 ├── README.md                  # generated project README
 ├── ORCHESTRA_REPORT.md        # consolidated report
 ├── .env.example
 └── .orchestra/
-    ├── run_1712345678.json    # full run memory
-    └── profile.json           # aggregated stats
+    ├── run_1712345678.json    # full run memory with per-module stats
+    └── profile.json           # aggregated stats across all runs
 ```
 
 <img src="assets/divider.svg" width="100%" alt=""/>
@@ -338,9 +456,16 @@ my-project/
 ## FAQ
 
 <details>
+<summary>When do parallel developers activate?</summary>
+
+When the Architect's ARCHITECTURE.md contains a `<!-- MODULES -->` block with 2+ modules. Each module has an id, name, scoped file list, and dependencies. If the Architect doesn't produce this block (small projects), Orchestra falls back to a single Developer — exactly like previous versions.
+
+</details>
+
+<details>
 <summary>Does it work on existing projects?</summary>
 
-Yes. `Existing Project` mode works in-place on a repo path, starts with a repo audit, writes a delta plan, and applies surgical changes with regression coverage.
+Yes. `Existing Project` mode works in-place, starts with a repo audit, writes a delta plan, and applies surgical changes with regression coverage.
 
 </details>
 
@@ -361,7 +486,14 @@ Yes — Orchestra stores the session ID. Click **Continue** to resume the saved 
 <details>
 <summary>Do temporary dev servers stay open after the run?</summary>
 
-No. Orchestra cleans up all listeners started from the project's working directory — including orphaned child processes (Vite, webpack, etc.) that survive agent termination.
+No. Orchestra aggressively cleans up: tracked ports, CWD-matched processes, second-sweep after 3s, and graceful shutdown on SIGTERM/SIGINT. Even orphaned grandchild processes (Vite, webpack) are caught.
+
+</details>
+
+<details>
+<summary>Can Orchestra use Gemini to create images?</summary>
+
+Yes, on-demand. When a Gemini API key is configured, the Developer can generate project-specific assets (hero illustrations, before/after scenes, custom icons). If Gemini is unavailable, the run continues without blocking.
 
 </details>
 
