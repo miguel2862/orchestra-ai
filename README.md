@@ -28,14 +28,6 @@ npm install -g orchestra-ai-app@latest && orchestra-ai
 
 <img src="assets/divider.svg" width="100%" alt=""/>
 
-## The Pipeline
-
-<div align="center">
-<img src="assets/pipeline.svg" alt="Agent Pipeline — animated flow" width="100%"/>
-</div>
-
-<br/>
-
 <table>
 <tr>
 <td width="50%">

@@ -18,11 +18,11 @@
       <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
     </linearGradient>
     <filter id="glow">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feGaussianBlur stdDeviation="4" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
     <filter id="noteGlow">
-      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feGaussianBlur stdDeviation="6" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
@@ -30,84 +30,86 @@
   <!-- Background -->
   <rect width="900" height="280" fill="url(#bgGrad)" rx="16"/>
 
-  <!-- Ambient glow behind logo -->
+  <!-- Ambient glow -->
   <ellipse cx="450" cy="105" rx="180" ry="70" fill="#7c3aed" opacity="0.06">
     <animate attributeName="opacity" values="0.04;0.09;0.04" dur="4s" repeatCount="indefinite"/>
-    <animate attributeName="rx" values="170;190;170" dur="4s" repeatCount="indefinite"/>
   </ellipse>
 
-  <!-- Horizontal separator line -->
+  <!-- Separator line -->
   <rect x="100" y="180" width="700" height="1" fill="url(#lineGrad)">
     <animate attributeName="opacity" values="0.4;0.8;0.4" dur="3s" repeatCount="indefinite"/>
   </rect>
 
-  <!-- ═══ Music note icon (conductor baton animation matching Layout.tsx) ═══ -->
-  <g transform="translate(383, 62)" filter="url(#noteGlow)">
-    <!-- Conductor arc: rotate -12→8→-4→0, scale 1→1.12→0.95→1 -->
-    <animateTransform attributeName="transform" type="rotate"
-      values="-12,17,20; 8,17,20; -4,17,20; 0,17,20; -12,17,20"
-      dur="3.2s" repeatCount="indefinite" additive="sum"/>
-    <animateTransform attributeName="transform" type="scale"
-      values="1; 1.12; 0.95; 1"
-      dur="3.2s" repeatCount="indefinite" additive="sum"/>
-    <!-- SVG music note matching Layout.tsx exactly -->
+  <!-- Static music note icon (no rotation — the particles are what move) -->
+  <g transform="translate(383, 68)" filter="url(#noteGlow)">
     <path d="M9 18V5l12-2v13" stroke="url(#violetGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
     <circle cx="6" cy="18" r="3" stroke="url(#violetGrad)" stroke-width="2.5" fill="none"/>
     <circle cx="18" cy="16" r="3" stroke="url(#violetGrad)" stroke-width="2.5" fill="none"/>
   </g>
 
-  <!-- ═══ Floating note particles (♪ ♫ ♬ ♩) matching Layout.tsx burst pattern ═══ -->
+  <!-- ═══ FLOATING PARTICLES — notes rising up and fading out ═══ -->
+  <!-- Like the app: they spawn near the icon, float upward, drift sideways, and disappear -->
 
-  <!-- Burst 1: ♪ drifts up-left -->
-  <text font-size="15" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♪
-    <animate attributeName="opacity" values="0;0.9;0.7;0" dur="1.8s" begin="0.8s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="80;56" dur="1.8s" begin="0.8s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="378;366" dur="1.8s" begin="0.8s" repeatCount="indefinite"/>
+  <!-- ♪ rises up-left, fades -->
+  <text font-size="16" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♪
+    <animate attributeName="opacity" values="0;0.9;0.8;0" dur="2.2s" begin="0s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="86;40" dur="2.2s" begin="0s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="382;368" dur="2.2s" begin="0s" repeatCount="indefinite"/>
   </text>
 
-  <!-- Burst 1: ♫ drifts up-right (600ms after ♪, matching Layout.tsx burst timing) -->
-  <text font-size="13" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♫
-    <animate attributeName="opacity" values="0;0.8;0.6;0" dur="1.8s" begin="1.4s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="72;50" dur="1.8s" begin="1.4s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="410;424" dur="1.8s" begin="1.4s" repeatCount="indefinite"/>
+  <!-- ♫ rises up-right, fades -->
+  <text font-size="14" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♫
+    <animate attributeName="opacity" values="0;0.85;0.7;0" dur="2.2s" begin="0.6s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="80;36" dur="2.2s" begin="0.6s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="412;428" dur="2.2s" begin="0.6s" repeatCount="indefinite"/>
   </text>
 
-  <!-- Burst 2: ♬ drifts up-left (2.8s cycle matching Layout.tsx) -->
-  <text font-size="14" fill="#818cf8" opacity="0" font-family="serif" filter="url(#glow)">♬
-    <animate attributeName="opacity" values="0;0.85;0.6;0" dur="1.8s" begin="3.6s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="76;52" dur="1.8s" begin="3.6s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="375;360" dur="1.8s" begin="3.6s" repeatCount="indefinite"/>
+  <!-- ♬ rises up-left -->
+  <text font-size="15" fill="#818cf8" opacity="0" font-family="serif" filter="url(#glow)">♬
+    <animate attributeName="opacity" values="0;0.9;0.7;0" dur="2.2s" begin="2.8s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="84;38" dur="2.2s" begin="2.8s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="376;358" dur="2.2s" begin="2.8s" repeatCount="indefinite"/>
   </text>
 
-  <!-- Burst 2: ♩ drifts up-right -->
-  <text font-size="12" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♩
-    <animate attributeName="opacity" values="0;0.8;0.5;0" dur="1.8s" begin="4.2s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="70;48" dur="1.8s" begin="4.2s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="415;430" dur="1.8s" begin="4.2s" repeatCount="indefinite"/>
+  <!-- ♩ rises up-right -->
+  <text font-size="13" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♩
+    <animate attributeName="opacity" values="0;0.8;0.6;0" dur="2.2s" begin="3.4s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="78;34" dur="2.2s" begin="3.4s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="418;436" dur="2.2s" begin="3.4s" repeatCount="indefinite"/>
   </text>
 
-  <!-- Burst 3: ♪ center-left -->
-  <text font-size="11" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♪
-    <animate attributeName="opacity" values="0;0.7;0.4;0" dur="1.8s" begin="6.4s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="78;58" dur="1.8s" begin="6.4s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="385;372" dur="1.8s" begin="6.4s" repeatCount="indefinite"/>
+  <!-- ♪ rises center-left -->
+  <text font-size="12" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♪
+    <animate attributeName="opacity" values="0;0.75;0.5;0" dur="2.2s" begin="5.6s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="82;40" dur="2.2s" begin="5.6s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="390;374" dur="2.2s" begin="5.6s" repeatCount="indefinite"/>
   </text>
 
-  <!-- Burst 3: ♫ center-right -->
-  <text font-size="13" fill="#818cf8" opacity="0" font-family="serif" filter="url(#glow)">♫
-    <animate attributeName="opacity" values="0;0.85;0.6;0" dur="1.8s" begin="7.0s" repeatCount="indefinite"/>
-    <animate attributeName="y" values="68;46" dur="1.8s" begin="7.0s" repeatCount="indefinite"/>
-    <animate attributeName="x" values="408;420" dur="1.8s" begin="7.0s" repeatCount="indefinite"/>
+  <!-- ♫ rises center-right -->
+  <text font-size="14" fill="#818cf8" opacity="0" font-family="serif" filter="url(#glow)">♫
+    <animate attributeName="opacity" values="0;0.85;0.65;0" dur="2.2s" begin="6.2s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="76;32" dur="2.2s" begin="6.2s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="406;422" dur="2.2s" begin="6.2s" repeatCount="indefinite"/>
   </text>
 
-  <!-- ═══ Title: "Orchestra AI" with breathing animation ═══ -->
+  <!-- ♬ rises far left -->
+  <text font-size="11" fill="#a78bfa" opacity="0" font-family="serif" filter="url(#glow)">♬
+    <animate attributeName="opacity" values="0;0.7;0.4;0" dur="2.2s" begin="8.4s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="88;44" dur="2.2s" begin="8.4s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="370;352" dur="2.2s" begin="8.4s" repeatCount="indefinite"/>
+  </text>
+
+  <!-- ♩ rises far right -->
+  <text font-size="13" fill="#c084fc" opacity="0" font-family="serif" filter="url(#glow)">♩
+    <animate attributeName="opacity" values="0;0.8;0.55;0" dur="2.2s" begin="9.0s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="80;36" dur="2.2s" begin="9.0s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="420;440" dur="2.2s" begin="9.0s" repeatCount="indefinite"/>
+  </text>
+
+  <!-- ═══ Title with breathing ═══ -->
   <text x="450" y="125" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="700" font-size="42" fill="url(#violetGrad)" filter="url(#glow)">
     Orchestra AI
-    <!-- Breathing scale+opacity matching Layout.tsx glowRef -->
     <animate attributeName="opacity" values="1;0.85;1" dur="3s" repeatCount="indefinite"/>
-    <animateTransform attributeName="transform" type="scale"
-      values="1;1.03;1" dur="3s" repeatCount="indefinite"
-      additive="sum"/>
   </text>
 
   <!-- Subtitle -->
@@ -115,7 +117,7 @@
     From idea to verified app — powered by 10 AI agents
   </text>
 
-  <!-- Bottom badges -->
+  <!-- Badges -->
   <g transform="translate(255, 200)">
     <rect width="78" height="26" rx="13" fill="#7c3aed" opacity="0.15" stroke="#7c3aed" stroke-opacity="0.3" stroke-width="1"/>
     <text x="39" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#c084fc" font-weight="500">npm v0.4.0</text>
@@ -133,23 +135,15 @@
     <text x="72" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#a5b4fc" font-weight="500">macOS / Win / Linux</text>
   </g>
 
-  <!-- Ambient pulsing dots -->
+  <!-- Ambient dots -->
   <circle cx="160" cy="100" r="1.5" fill="#a78bfa" opacity="0.2">
     <animate attributeName="opacity" values="0.1;0.35;0.1" dur="2.5s" repeatCount="indefinite"/>
-    <animate attributeName="r" values="1;2;1" dur="2.5s" repeatCount="indefinite"/>
   </circle>
   <circle cx="740" cy="100" r="1.5" fill="#a78bfa" opacity="0.2">
     <animate attributeName="opacity" values="0.1;0.35;0.1" dur="2.5s" begin="1.2s" repeatCount="indefinite"/>
-    <animate attributeName="r" values="1;2;1" dur="2.5s" begin="1.2s" repeatCount="indefinite"/>
-  </circle>
-  <circle cx="200" cy="140" r="1" fill="#c084fc" opacity="0.15">
-    <animate attributeName="opacity" values="0.08;0.25;0.08" dur="3s" begin="0.5s" repeatCount="indefinite"/>
-  </circle>
-  <circle cx="700" cy="140" r="1" fill="#c084fc" opacity="0.15">
-    <animate attributeName="opacity" values="0.08;0.25;0.08" dur="3s" begin="2s" repeatCount="indefinite"/>
   </circle>
 
-  <!-- Bottom border glow -->
+  <!-- Bottom glow -->
   <rect x="0" y="276" width="900" height="4" rx="2" fill="url(#lineGrad)">
     <animate attributeName="opacity" values="0.5;1;0.5" dur="3s" repeatCount="indefinite"/>
   </rect>
