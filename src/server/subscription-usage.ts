@@ -53,8 +53,8 @@ const EMPTY: SubscriptionUsage = {
 // The /api/oauth/usage endpoint has a known rate-limit bug (GitHub #30930).
 // Strategy: try API once (no retries to save rate limit budget), fall back to
 // CodexBar's cached widget-snapshot.json on macOS if API fails.
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min fresh
-const STALE_TTL_MS = 30 * 60 * 1000; // serve stale up to 30 min
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min fresh (CodexBar updates faster)
+const STALE_TTL_MS = 15 * 60 * 1000; // serve stale up to 15 min
 
 let cachedResult: SubscriptionUsage | null = null;
 let cachedAt = 0;
@@ -274,7 +274,7 @@ async function fetchFromApi(token: string): Promise<SubscriptionUsage> {
       Authorization: `Bearer ${token}`,
       "anthropic-beta": "oauth-2025-04-20",
       "Content-Type": "application/json",
-      "User-Agent": "orchestra-ai-app/0.1.0",
+      "User-Agent": "orchestra-ai-app/0.4.0",
     },
     signal: AbortSignal.timeout(5000),
   });
@@ -315,8 +315,18 @@ export async function getSubscriptionUsage(): Promise<SubscriptionUsage> {
   const age = now - cachedAt;
   const codexBarSnapshot = readCodexBarSnapshot();
 
-  // Fresh cache — return immediately
+  // Fresh cache — but check if CodexBar has newer percentages
   if (cachedResult?.available && age < CACHE_TTL_MS) {
+    if (codexBarSnapshot?.available) {
+      if (codexBarSnapshot.sessionPercent > cachedResult.sessionPercent) {
+        cachedResult.sessionPercent = codexBarSnapshot.sessionPercent;
+        cachedResult.sessionResetAt = codexBarSnapshot.sessionResetAt ?? cachedResult.sessionResetAt;
+      }
+      if (codexBarSnapshot.weeklyPercent > cachedResult.weeklyPercent) {
+        cachedResult.weeklyPercent = codexBarSnapshot.weeklyPercent;
+        cachedResult.weeklyResetAt = codexBarSnapshot.weeklyResetAt ?? cachedResult.weeklyResetAt;
+      }
+    }
     return cachedResult;
   }
 
@@ -362,9 +372,25 @@ async function refreshUsage(): Promise<SubscriptionUsage> {
     try {
       const result = await fetchFromApi(token);
       if (result.available) {
-        // Enrich with CodexBar cost data if available
+        // Enrich with CodexBar data if available — CodexBar updates more
+        // frequently than our cache, so prefer its percentages when higher
         const cbData = readCodexBarSnapshot();
-        if (cbData?.todayCostUsd !== undefined) {
+        if (cbData?.available) {
+          if (cbData.sessionPercent > result.sessionPercent) {
+            result.sessionPercent = cbData.sessionPercent;
+            result.sessionResetAt = cbData.sessionResetAt ?? result.sessionResetAt;
+          }
+          if (cbData.weeklyPercent > result.weeklyPercent) {
+            result.weeklyPercent = cbData.weeklyPercent;
+            result.weeklyResetAt = cbData.weeklyResetAt ?? result.weeklyResetAt;
+          }
+          if (cbData.todayCostUsd !== undefined) {
+            result.todayCostUsd = cbData.todayCostUsd;
+            result.todayTokens = cbData.todayTokens;
+            result.last30DaysCostUsd = cbData.last30DaysCostUsd;
+            result.last30DaysTokens = cbData.last30DaysTokens;
+          }
+        } else if (cbData?.todayCostUsd !== undefined) {
           result.todayCostUsd = cbData.todayCostUsd;
           result.todayTokens = cbData.todayTokens;
           result.last30DaysCostUsd = cbData.last30DaysCostUsd;

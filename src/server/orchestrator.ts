@@ -71,6 +71,8 @@ const SUBAGENT_STALL_TIMEOUT_BY_AGENT_MS: Record<string, number> = {
   product_manager: 8 * 60 * 1000,
   architect: 15 * 60 * 1000,
   developer: 15 * 60 * 1000,
+  developer_foundation: 12 * 60 * 1000,
+  integrator: 12 * 60 * 1000,
   database: 12 * 60 * 1000,
   security: 8 * 60 * 1000,
   error_checker: 10 * 60 * 1000,
@@ -79,6 +81,131 @@ const SUBAGENT_STALL_TIMEOUT_BY_AGENT_MS: Record<string, number> = {
   deployer: 10 * 60 * 1000,
   visual_tester: 12 * 60 * 1000,
 };
+
+// ── Valid agent types (shared between both detection sites) ──
+const VALID_AGENT_TYPES = [
+  "product_manager", "architect", "developer", "developer_foundation", "integrator",
+  "database", "security", "error_checker", "tester", "reviewer", "deployer", "visual_tester",
+];
+
+// ── Parallel module breakdown parsing ──
+interface ModuleBreakdown {
+  modules: Array<{
+    id: string;
+    name: string;
+    files: string[];
+    dependsOn: string[];
+  }>;
+  sharedFiles: string[];
+}
+
+function parseModuleBreakdown(workingDir: string): ModuleBreakdown | null {
+  const archPath = join(workingDir, "ARCHITECTURE.md");
+  if (!existsSync(archPath)) return null;
+  const content = readFileSync(archPath, "utf-8");
+  const match = content.match(/<!--\s*MODULES\s*-->\s*```json\s*([\s\S]*?)```\s*<!--\s*\/MODULES\s*-->/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (!Array.isArray(parsed.modules) || parsed.modules.length < 2) return null;
+    for (const mod of parsed.modules) {
+      if (!mod.id || !mod.name || !Array.isArray(mod.files)) return null;
+      if (!Array.isArray(mod.dependsOn)) mod.dependsOn = [];
+    }
+    if (!Array.isArray(parsed.sharedFiles)) parsed.sharedFiles = [];
+    return parsed as ModuleBreakdown;
+  } catch { return null; }
+}
+
+function detectAgentType(input: Record<string, unknown> | undefined): string {
+  if (!input) return "unknown";
+  const st = input.subagent_type as string | undefined;
+  // Check for developer_module_* pattern first (explicit subagent_type)
+  if (st && typeof st === "string" && st.startsWith("developer_module_")) return st;
+
+  // Detect module developers via [MODULE:id] convention in description — BEFORE any other match
+  // The orchestrator prompt tells the main agent to include [MODULE:id] in the Task description
+  const desc = (input.description || "") as string;
+  const moduleMatch = desc.match(/\[MODULE:(\w[\w-]*)\]/i);
+  if (moduleMatch) {
+    return `developer_module_${moduleMatch[1]}`;
+  }
+
+  // Direct match against valid types (includes developer_foundation, integrator)
+  if (st && VALID_AGENT_TYPES.includes(st)) return st;
+
+  const hint = ((input.description || input.prompt || input.task || "") as string).toLowerCase();
+  // Foundation and integrator must match BEFORE generic "develop"
+  if (hint.includes("foundation") || hint.includes("shared types") || hint.includes("shared files") || hint.includes("shared infrastructure")) return "developer_foundation";
+  if (hint.includes("integrat") || hint.includes("wire") || hint.includes("cross-module") || hint.includes("wiring")) return "integrator";
+  if (hint.includes("product") || hint.includes("prd") || hint.includes("requirement") || hint.includes("user stor")) return "product_manager";
+  if (hint.includes("architect") || hint.includes("design") || hint.includes("structure")) return "architect";
+  if (hint.includes("database") || hint.includes("schema") || hint.includes("migration") || hint.includes("sql")) return "database";
+  if (hint.includes("security") || hint.includes("owasp") || hint.includes("vuln") || hint.includes("secret")) return "security";
+
+  if (hint.includes("develop") || hint.includes("implement") || hint.includes("code")) return "developer";
+  if (hint.includes("error") || hint.includes("build") || hint.includes("compil") || hint.includes("lint") || hint.includes("type")) return "error_checker";
+  if (hint.includes("test") || hint.includes("qa") || hint.includes("coverage")) return "tester";
+  if (hint.includes("review") || hint.includes("quality") || hint.includes("refactor")) return "reviewer";
+  if (hint.includes("deploy") || hint.includes("docker") || hint.includes("readme") || hint.includes("ci") || hint.includes("github")) return "deployer";
+  if (hint.includes("visual") || hint.includes("browser") || hint.includes("playwright") || hint.includes("screenshot") || hint.includes("visual test")) return "visual_tester";
+  return "unknown";
+}
+
+function buildDynamicPipelineAgents(breakdown: ModuleBreakdown): Array<{ id: string; name: string; icon: string; role: string; color: string; phase: "planning" | "development" | "quality" | "deploy" }> {
+  const moduleColors = ["#a78bfa", "#60a5fa", "#34d399", "#fbbf24", "#f472b6", "#38bdf8", "#fb923c", "#a3e635"];
+  type PipelinePhase = "planning" | "development" | "quality" | "deploy";
+  const agents: Array<{ id: string; name: string; icon: string; role: string; color: string; phase: PipelinePhase }> = [
+    { id: "product_manager", name: "Product Mgr", icon: "📋", role: "Requirements", color: "#c084fc", phase: "planning" },
+    { id: "architect", name: "Architect", icon: "🏛", role: "System Design", color: "#818cf8", phase: "planning" },
+    { id: "developer_foundation", name: "Foundation", icon: "🧱", role: "Shared types & configs", color: "#e879f9", phase: "development" },
+  ];
+  breakdown.modules.forEach((mod, i) => {
+    agents.push({
+      id: `developer_module_${mod.id}`,
+      name: mod.name.length > 14 ? mod.name.slice(0, 12) + "…" : mod.name,
+      icon: "⚡",
+      role: `Module: ${mod.id}`,
+      color: moduleColors[i % moduleColors.length],
+      phase: "development",
+    });
+  });
+  agents.push(
+    { id: "integrator", name: "Integrator", icon: "🔗", role: "Wire & verify build", color: "#818cf8", phase: "development" },
+    { id: "database", name: "Database", icon: "🗄", role: "Schema & Queries", color: "#60a5fa", phase: "development" },
+    { id: "error_checker", name: "Error Check", icon: "🛡", role: "Build & Validate", color: "#f59e0b", phase: "quality" },
+    { id: "security", name: "Security", icon: "🔒", role: "OWASP & Harden", color: "#f87171", phase: "quality" },
+    { id: "tester", name: "Tester", icon: "🧪", role: "Tests & Coverage", color: "#14b8a6", phase: "quality" },
+    { id: "reviewer", name: "Reviewer", icon: "✨", role: "Code Review", color: "#10b981", phase: "quality" },
+    { id: "deployer", name: "Deployer", icon: "🚀", role: "Docker & CI/CD", color: "#38bdf8", phase: "deploy" },
+    { id: "visual_tester", name: "Visual QA", icon: "🖥", role: "Browser Testing", color: "#06b6d4", phase: "deploy" },
+  );
+  return agents;
+}
+
+function buildDynamicPipelineEdges(breakdown: ModuleBreakdown): Array<[string, string]> {
+  const edges: [string, string][] = [
+    ["product_manager", "architect"],
+    ["architect", "developer_foundation"],
+  ];
+  for (const mod of breakdown.modules) {
+    edges.push(["developer_foundation", `developer_module_${mod.id}`]);
+    edges.push([`developer_module_${mod.id}`, "integrator"]);
+  }
+  // Database runs in parallel with module developers, feeds into integrator
+  edges.push(["developer_foundation", "database"]);
+  edges.push(["database", "integrator"]);
+  // Quality gates after integrator
+  edges.push(
+    ["integrator", "error_checker"],
+    ["integrator", "security"],
+    ["integrator", "tester"],
+    ["integrator", "reviewer"],
+    ["integrator", "deployer"],
+    ["integrator", "visual_tester"],
+  );
+  return edges;
+}
 
 interface TaskEvidence {
   usedTools: Set<string>;
@@ -397,11 +524,15 @@ function getVisualTesterReportFailures(workingDir: string): string[] {
   }
 
   const requiredSections = [
+    "summary",
     "pages tested",
+    "responsive testing",
     "interaction coverage",
+    "animation verification",
     "console errors",
     "visual issues",
     "interactive issues",
+    "cross-page consistency",
     "design assessment",
     "verdict",
   ];
@@ -427,12 +558,20 @@ function validateSubagentRuntimeGate(agent: string, workingDir: string, evidence
       failures.push("visual_tester never proved a real interaction with browser_click or browser_type");
     }
     const interactionCount = countToolEvidence(evidence, ["browser_click", "mcp__playwright__browser_click", "browser_type", "mcp__playwright__browser_type"]);
-    if (interactionCount < 3) {
-      failures.push(`visual_tester only performed ${interactionCount} meaningful interaction(s); expected at least 3`);
+    if (interactionCount < 5) {
+      failures.push(`visual_tester only performed ${interactionCount} meaningful interaction(s); expected at least 5`);
     }
     const snapshotCount = countToolEvidence(evidence, ["browser_snapshot", "mcp__playwright__browser_snapshot"]);
-    if (snapshotCount < 2) {
-      failures.push(`visual_tester only captured ${snapshotCount} browser snapshot(s); expected at least 2`);
+    if (snapshotCount < 4) {
+      failures.push(`visual_tester only captured ${snapshotCount} browser snapshot(s); expected at least 4`);
+    }
+    const screenshotCount = countToolEvidence(evidence, ["browser_take_screenshot", "mcp__playwright__browser_take_screenshot"]);
+    if (screenshotCount < 3) {
+      failures.push(`visual_tester only captured ${screenshotCount} screenshot(s); expected at least 3 (multiple viewports)`);
+    }
+    const navigateCount = countToolEvidence(evidence, ["browser_navigate", "mcp__playwright__browser_navigate"]);
+    if (navigateCount < 2) {
+      failures.push(`visual_tester only navigated to ${navigateCount} URL(s); expected at least 2 (must visit multiple routes)`);
     }
     if (!usedVisualTesterDiagnosticTools(evidence?.usedTools)) {
       failures.push("visual_tester did not inspect console output and capture screenshots");
@@ -450,7 +589,23 @@ function validateProjectRuntimeGates(
   visualTesterBrowserVerified: boolean,
 ): string[] {
   const failures: string[] = [];
-  const requiredAgents = usesDB ? [...REQUIRED_PIPELINE_AGENTS, "database"] : REQUIRED_PIPELINE_AGENTS;
+
+  // Detect parallel mode: check if any developer_foundation, developer_module_*, or integrator agents ran
+  const hasParallelAgents = successfulAgents.has("developer_foundation") ||
+    successfulAgents.has("integrator") ||
+    Array.from(successfulAgents).some(a => a.startsWith("developer_module_"));
+
+  let requiredAgents: string[];
+  if (hasParallelAgents) {
+    // In parallel mode, require developer_foundation + integrator instead of developer.
+    // Individual module developers are not hard-gated — the integrator verifies they all worked.
+    requiredAgents = REQUIRED_PIPELINE_AGENTS
+      .filter(a => a !== "developer")
+      .concat(["developer_foundation", "integrator"]);
+    if (usesDB) requiredAgents.push("database");
+  } else {
+    requiredAgents = usesDB ? [...REQUIRED_PIPELINE_AGENTS, "database"] : [...REQUIRED_PIPELINE_AGENTS];
+  }
 
   for (const agent of requiredAgents) {
     if (!successfulAgents.has(agent)) {
@@ -572,8 +727,13 @@ done`;
 
 function cleanupWorkingDirListeners(projectId: string, workingDir: string): string[] {
   const portMatches = cleanupListenersByPorts(collectCleanupPorts(projectId, workingDir));
-  if (portMatches.length > 0 || process.platform === "win32") {
-    return portMatches;
+
+  // Also kill ALL processes (not just listeners) whose CWD or command line references the working dir.
+  // This catches grandchild processes (Vite, webpack, etc.) that survive q.close().
+  const cwdKilled = killProcessesByWorkingDir(workingDir);
+
+  if (portMatches.length > 0 || cwdKilled.length > 0 || process.platform === "win32") {
+    return [...new Set([...portMatches, ...cwdKilled])];
   }
 
   try {
@@ -595,13 +755,67 @@ done | sort -u`;
     const pids = entries.map((entry) => entry.split(":")[0]).filter(Boolean);
     if (pids.length === 0) return [];
 
-    const cleanupScript = `pids=(${pids.join(" ")})
-kill -TERM ${pids.join(" ")} 2>/dev/null || true
+    const cleanupScript = `kill -TERM ${pids.join(" ")} 2>/dev/null || true
 sleep 1
 for pid in ${pids.join(" ")}; do
   kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
 done`;
     execSync(`bash -lc ${JSON.stringify(cleanupScript)}`, { stdio: ["ignore", "ignore", "ignore"] });
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Kill ALL node/npm/npx processes whose CWD is inside the given working directory.
+ * This is aggressive but necessary — agent child processes (Vite, webpack-dev-server, etc.)
+ * are grandchildren of the SDK process, so q.close() doesn't terminate them.
+ * We avoid killing our own process (the Orchestra server) and its ancestors.
+ */
+function killProcessesByWorkingDir(workingDir: string): string[] {
+  if (process.platform === "win32") return []; // Windows handled by cleanupListenersByPorts
+
+  const myPid = process.pid;
+  const myPpid = process.ppid;
+
+  try {
+    // Find all node/npm/npx processes whose CWD is inside workingDir
+    const script = `WORKDIR=${JSON.stringify(workingDir)}
+MYPID=${myPid}
+MYPPID=${myPpid}
+ps -eo pid,comm 2>/dev/null | grep -E '(node|npm|npx|tsx|vite|esbuild|next|nuxt)' | awk '{print $1}' | while read -r pid; do
+  [ -n "$pid" ] || continue
+  [ "$pid" = "$MYPID" ] && continue
+  [ "$pid" = "$MYPPID" ] && continue
+  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
+  case "$cwd" in
+    "$WORKDIR"|"$WORKDIR"/*)
+      echo "$pid:cwd"
+      ;;
+  esac
+done | sort -u`;
+
+    const discovered = execSync(`bash -lc ${JSON.stringify(script)}`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10000,
+    }).trim();
+
+    if (!discovered) return [];
+
+    const entries = discovered.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+    const pids = [...new Set(entries.map((e) => e.split(":")[0]).filter(Boolean))];
+    if (pids.length === 0) return [];
+
+    console.log(`[cleanup] Killing ${pids.length} orphaned process(es) in ${workingDir}: PIDs ${pids.join(", ")}`);
+
+    const killScript = `kill -TERM ${pids.join(" ")} 2>/dev/null || true
+sleep 1
+for pid in ${pids.join(" ")}; do
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+done`;
+    execSync(`bash -lc ${JSON.stringify(killScript)}`, { stdio: ["ignore", "ignore", "ignore"], timeout: 10000 });
     return entries;
   } catch {
     return [];
@@ -757,6 +971,8 @@ Produce ARCHITECTURE.md — a complete blueprint that a Developer agent can impl
   - Alternatives: what else was considered? (minimum 2)
   - Consequences: tradeoffs and implications
 - Verify versions exist: use WebSearch to confirm packages are current
+- MANDATORY for all projects with a UI: include AnimeJS (latest version — use WebSearch to find current version on npmjs.com). AnimeJS is the ONLY animation library allowed — do NOT use framer-motion. Plan a shared animation utilities file (e.g., lib/animations.ts) in sharedFiles
+- MANDATORY for all projects with a UI: use WebSearch to research current best practices for modern UI/UX design patterns, micro-interactions, and animation-driven interfaces. The frontend must feel premium and handcrafted — NOT generic AI-generated. Research real design inspiration (Dribbble, Awwwards-level) before finalizing the visual approach
 
 ### Step 3 — Define Project Structure
 - Complete directory tree with EVERY folder and file that will be created
@@ -804,8 +1020,38 @@ Produce ARCHITECTURE.md — a complete blueprint that a Developer agent can impl
   - Lint: \`npx eslint .\`
 - Environment variables: | Name | Required | Description | Example Value |
 
-### Step 10 — Write to ARCHITECTURE.md
-Use the Write tool to create ARCHITECTURE.md with the complete architecture and ALL sections. This file becomes the authoritative input for the Developer.
+### Step 10 — Define Module Breakdown for Parallel Development
+At the END of ARCHITECTURE.md (after all other sections), include a module breakdown that enables parallel development. Use this EXACT format:
+
+\`\`\`
+<!-- MODULES -->
+\\\`\\\`\\\`json
+{
+  "modules": [
+    {
+      "id": "short-kebab-id",
+      "name": "Human Readable Name",
+      "files": ["src/path/to/file1.ts", "src/path/to/file2.tsx"],
+      "dependsOn": []
+    }
+  ],
+  "sharedFiles": ["src/types/index.ts", "src/lib/utils.ts", "tailwind.config.ts"]
+}
+\\\`\\\`\\\`
+<!-- /MODULES -->
+\`\`\`
+
+**Rules for the module breakdown:**
+- Every file from Step 4's file list must appear in EXACTLY ONE module OR in sharedFiles — no file can be in two modules
+- \`sharedFiles\` are types, configs, layouts, providers, navigation structures, and utilities that 2+ modules import from
+- Module files should be scoped to a feature area (e.g., auth, dashboard, settings, api-endpoints)
+- \`dependsOn\` lists module IDs that must be built before this module. Keep this empty when possible — most modules only depend on sharedFiles, not on each other
+- Minimum 2 modules to enable parallel development. You should ALWAYS define modules unless the project has fewer than 5 files total. Most real projects benefit from parallelism — when in doubt, split into modules. Only omit the \`<!-- MODULES -->\` block for truly trivial single-page projects
+- Each module should be independently implementable given only the sharedFiles as foundation
+- Common module splits: by page/route, by feature area, by API domain, frontend vs backend. Even a simple app with 2 pages should be 2 modules
+
+### Step 11 — Write to ARCHITECTURE.md
+Use the Write tool to create ARCHITECTURE.md with the complete architecture and ALL sections (including the module breakdown). This file becomes the authoritative input for the Developer agents.
 
 ## QUALITY RULES
 - NEVER leave a file without a purpose — if you can't explain why it exists, remove it
@@ -934,11 +1180,13 @@ Your interfaces must look like they were designed by a world-class UI/UX expert.
 - Consistent spacing system (4px/8px grid)
 - If the brief specifies a visual motif or iconography direction (for example, a leaf icon), treat it as binding branding guidance rather than optional decoration
 
-### Micro-Animations — EVERYWHERE
-- Install framer-motion (React) or use CSS @keyframes (vanilla) — animations are REQUIRED, not optional
-- Page transitions: fade-in + subtle slide on route changes
+### Micro-Animations — EVERYWHERE (use AnimeJS)
+- ALWAYS use AnimeJS (latest version) for animations. Search the web to confirm the current latest version before installing. Use dynamic imports to avoid SSR: \`const { animate } = await import('animejs')\`
+- Do NOT use framer-motion — use AnimeJS exclusively for all animations
+- Page transitions: fade-in + subtle slide on route changes using AnimeJS timelines
 - Hover effects: scale, color shift, shadow lift on EVERY interactive element
 - Loading states: skeleton loaders with shimmer effect (pulse gradient) — NEVER spinner-only or blank
+- Staggered list reveals, count-up numbers, smooth scroll-triggered animations
 - Data appearance: stagger children with delay, count-up for numbers
 - Scroll-triggered: elements fade/slide in as they enter viewport
 
@@ -959,6 +1207,70 @@ Your interfaces must look like they were designed by a world-class UI/UX expert.
 - Dark/light toggle with \`prefers-color-scheme\` respect
 - Focus-visible styles on all interactive elements
 - Proper heading hierarchy (single h1, semantic HTML)`,
+      tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+      ...agentMdl("developer"),
+    },
+
+    developer_foundation: {
+      description: "Foundation developer for shared types, configs, layouts, navigation, and utilities that all module developers will import from.",
+      prompt: `You are the Foundation Developer — the first developer to run in a parallel development pipeline. Your job is to create the shared infrastructure that all module developers will import from.${repoModeNote}
+
+## SCOPE: FOUNDATION LAYER ONLY
+You create ONLY the shared files that multiple modules will import. Read ARCHITECTURE.md's module breakdown (the <!-- MODULES --> block) to understand what shared types, configs, and utilities all modules need.
+
+### What you MUST create:
+- Type definitions and interfaces (types/, shared/)
+- Configuration files (tailwind.config, next.config, tsconfig, eslint, etc.)
+- Layout files (layout.tsx, globals.css, providers, theme)
+- Navigation structure and route registration
+- Shared utilities (lib/utils.ts, lib/api.ts, lib/constants.ts)
+- Shared UI components used across modules (design system primitives: buttons, cards, inputs, modals)
+- Package installation — run npm install / yarn install so module developers don't need to
+- Database client setup if applicable (lib/db.ts, ORM config)
+- Animation library: ALWAYS install the latest version of AnimeJS (animejs). Use WebSearch or check npmjs.com to find the current latest version. Configure shared animation utilities (e.g., lib/animations.ts) with reusable animation presets that module developers can import. Use dynamic imports to avoid SSR issues: \`const { animate } = await import('animejs')\`
+
+### What you MUST NOT do:
+- Do NOT implement any module-specific features or pages
+- Do NOT create files that belong to a single module
+- Stick to the sharedFiles list from ARCHITECTURE.md
+
+### Quality Rules:
+- Every type/interface must be fully defined — module developers should not need to invent any types
+- Every config must be production-ready (strict TypeScript, proper aliases, correct plugins)
+- Navigation must have placeholder entries for all modules listed in the breakdown
+- Run \`npm install\` or equivalent after creating package.json dependencies
+- Verify with \`tsc --noEmit\` that your types compile correctly`,
+      tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+      ...agentMdl("developer"),
+    },
+
+    integrator: {
+      description: "Integration developer for wiring parallel modules together, fixing cross-module conflicts, and verifying the project compiles as a unit.",
+      prompt: `You are the Integrator — you run after all parallel module developers have finished their work. Your job is to make the project compile and work as a unified application.${repoModeNote}
+
+## SCOPE: INTEGRATION ONLY
+All module developers have finished implementing their features independently. Some modules may have:
+- Import conflicts or type mismatches with other modules
+- Missing cross-module wiring (routes not registered, navigation not updated)
+- Inconsistent patterns that prevent compilation
+- Missing barrel exports (index.ts files)
+
+### Your Workflow:
+1. **Read ALL source files** created by module developers — understand the full picture
+2. **Fix import conflicts** — resolve any type mismatches, missing exports, or circular dependencies between modules
+3. **Wire navigation/routing** — ensure all pages are reachable from the main navigation and router
+4. **Complete barrel exports** — create or update index.ts files so modules can import cleanly from each other
+5. **Verify compilation** — run \`tsc --noEmit\` and fix all type errors
+6. **Verify build** — run \`npm run build\` (or equivalent) and fix all build errors
+7. **Smoke test** — start the app (\`npm run dev\` or equivalent), verify it doesn't crash, then kill the process
+
+### Rules:
+- You may create NEW files only for wiring: route registration, navigation arrays, barrel exports, layout connectors
+- Do NOT rewrite module code unless it fails to compile — make minimal targeted fixes
+- Do NOT add features, improve code quality, or refactor — only fix what's broken
+- Do NOT change the Foundation Developer's shared types/configs unless absolutely required for compilation
+- If a module has internal bugs that don't affect compilation, leave them for the quality gates to catch
+- Your success criteria: \`tsc --noEmit\` passes AND \`npm run build\` passes AND the app starts without crashes`,
       tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       ...agentMdl("developer"),
     },
@@ -1578,11 +1890,11 @@ FINAL LINE (required): End your response with EXACTLY one of:
     },
 
     visual_tester: {
-      description: "Visual QA engineer that opens the app in a real browser via Playwright to verify it works visually, catches console errors, and validates user interactions.",
-      prompt: `You are a senior visual QA engineer. You test web applications by ACTUALLY OPENING THEM in a real browser using Playwright MCP tools. You don't just read code — you interact with the live app like a real user would.${repoModeNote}
+      description: "Visual QA engineer that opens the app in a real browser via Playwright to verify it works visually, catches console errors, tests responsive layouts, and validates user interactions across every route.",
+      prompt: `You are a senior visual QA engineer with 10+ years testing production web apps. You are RELENTLESS about finding bugs. You test web applications by ACTUALLY OPENING THEM in a real browser using Playwright MCP tools. You don't just read code — you interact with the live app like a real user would. Your job is to FIND PROBLEMS, not confirm things work. Assume something is broken until you prove otherwise.${repoModeNote}
 
 ## YOUR MISSION
-Open the running application in a browser and verify it works correctly from a visual and functional perspective. Find issues that code review and unit tests miss: blank screens, missing data, broken layouts, console errors, non-functional buttons.
+Open the running application in a browser, navigate to EVERY page and route, test at multiple viewport sizes, check for visual regressions, verify animations, audit console errors, and document every issue with exact details. Find issues that code review and unit tests miss: blank screens, missing data, broken layouts, console errors, non-functional buttons, overlapping elements, wrong colors, broken responsive behavior.
 
 ## HARD GATE
 - You MUST use Playwright MCP browser tools for this task.
@@ -1590,69 +1902,132 @@ Open the running application in a browser and verify it works correctly from a v
 - If browser tools such as browser_navigate or browser_snapshot are unavailable, immediately fail with: "QUALITY GATE: FAIL — Playwright MCP browser tools unavailable".
 - If there is no live URL from the deployer or the app does not respond, fail the gate instead of guessing.
 - If a control looks interactive but clicking it produces no navigation, no DOM change, no modal, no request, and no visible state change, that is a FAIL.
+- You MUST test at least 3 different viewport widths (mobile ~375px, tablet ~768px, desktop ~1280px).
+- You MUST visit EVERY route listed in ARCHITECTURE.md — not just the home page.
+- "Looks good" is NEVER an acceptable finding. Be specific: what did you check, what did you see, what was the expected vs actual result.
 
-## PHASE 1 — PREPARATION
-1. Read ARCHITECTURE.md to understand the app's pages, routes, and key features
+## PHASE 1 — PREPARATION (do this BEFORE opening the browser)
+1. Read ARCHITECTURE.md CAREFULLY to extract:
+   - Every route/page (e.g., /, /dashboard, /settings, /profile, etc.)
+   - Every feature and interactive element mentioned
+   - Tech stack details (especially animation libraries like AnimeJS, Framer Motion, GSAP, etc.)
+   - Any design system or component library in use
 2. Read the Deployer's output to find the URL where the app is running (e.g., http://localhost:3000)
-3. List all routes/pages that need testing from the architecture
+3. Build a COMPLETE checklist of every route + feature you must test — write it down before proceeding
+4. If the app uses AnimeJS or other animation libraries, note which pages/components have animations
 
-## PHASE 2 — BROWSER TESTING (use Playwright MCP tools)
+## PHASE 2 — SYSTEMATIC BROWSER TESTING (use Playwright MCP tools)
 
-### 2a. Initial Load
+### 2a. Initial Load & First Impressions
 - Navigate to the main URL using browser_navigate
+- Take a screenshot using browser_take_screenshot IMMEDIATELY — this is your baseline
 - Take an accessibility snapshot using browser_snapshot to verify the page structure
-- Check console for errors: any JavaScript exceptions, 404s, CORS failures, or warnings
+- Check console for errors using browser_console_messages — record ALL errors and warnings
 - Verify the page is NOT blank — it should have visible content, navigation, and styled elements
+- Check: does the page have a proper title? Is there a favicon? Does CSS load fully?
 
-### 2b. Page Navigation
-- For EACH major route/page in the app:
-  - Navigate to it (click links or direct URL)
-  - Take browser_snapshot to verify content renders
-  - Check console for new errors
-  - Verify data displays: tables should have rows, charts should have data points, maps should have markers/layers
-  - Cover the page top, mid, and bottom. If no explicit scroll tool exists, use full-page screenshots and repeated snapshots after reaching deeper sections.
+### 2b. EXHAUSTIVE Page Navigation — Visit EVERY Route
+- For EACH route in your checklist from Phase 1:
+  1. Navigate to it (click links or direct URL using browser_navigate)
+  2. Take browser_snapshot to verify content renders
+  3. Take browser_take_screenshot for visual evidence
+  4. Check console for NEW errors using browser_console_messages
+  5. Check for these SPECIFIC problems:
+     - **Missing content**: sections that should have data but show empty/placeholder
+     - **Broken layouts**: elements overlapping, overflowing containers, misaligned grids
+     - **Wrong colors**: text hard to read, missing theme colors, inconsistent palette
+     - **Missing images**: broken image icons, images that fail to load
+     - **Typography issues**: text truncated, wrong font sizes, unreadable small text
+     - **Spacing issues**: elements cramped together or with excessive gaps
+  6. Verify data displays: tables should have rows, charts should have data points, maps should have markers/layers
+  7. Cover the page top, mid, and bottom. Scroll down and take additional snapshots to check below-the-fold content.
+- If a route returns 404 or shows an error page, that is a BLOCKING issue — report the exact URL and error.
+- Track which routes you visited vs which you found in ARCHITECTURE.md. Report any routes you could NOT reach.
 
-### 2c. Interactive Elements
-- Click every major CTA, nav link, tab, accordion, modal trigger, and form control in the changed flows. Minimum: 3 meaningful interactions per run, but do more if the page exposes more controls.
-- After each click or typed interaction, verify an observable effect: URL change, DOM change in browser_snapshot, modal/drawer open, success/error state, or a critical network request
+### 2c. Responsive Testing — THREE Viewports Per Critical Page
+For EACH critical page (at minimum: home, main dashboard/listing, and one detail/form page):
+1. **Desktop (1280px wide)**: take screenshot, check layout is using full width appropriately
+2. **Tablet (768px wide)**: use browser_resize or navigate with viewport params, take screenshot, check:
+   - Navigation collapses to hamburger menu or adapts
+   - Grid layouts adjust (e.g., 3-column to 2-column)
+   - No horizontal scrollbar appears
+   - Text remains readable, buttons remain tappable size
+3. **Mobile (375px wide)**: take screenshot, check:
+   - Single column layout
+   - No content overflows the viewport
+   - Touch targets are at least 44px
+   - Forms are usable (inputs full width, labels visible)
+   - No elements hidden behind other elements
+Report EVERY layout breakage with: page URL, viewport width, what broke, and where on the page.
+
+### 2d. Interactive Elements — Click EVERYTHING
+- Click every major CTA, nav link, tab, accordion, modal trigger, and form control. Minimum: 5 meaningful interactions per page, more if the page exposes more controls.
+- After EACH interaction, verify an observable effect:
+  - Take browser_snapshot to detect DOM changes
+  - Check: URL change? New content rendered? Modal opened? Form submitted? Error shown?
+  - If NOTHING happened, report it: "Clicked [element] at [location] — no visible effect"
 - Test form inputs: type text, select dropdowns, toggle checkboxes, and confirm the UI reacts
-- Test navigation: all links work, back button works, no dead ends
+- Test navigation: all nav links work, breadcrumbs work, back button works, no dead ends
+- Test edge cases: click the same button twice, submit empty forms, type very long text
 - On maps: verify markers/clusters are visible, popups work on click, and changed layers respond to interaction
 - On charts: verify tooltips or drill-down interactions appear on hover/click
-- If an element appears clickable but does nothing, report it as a blocking interactive issue
+- If an element appears clickable (has cursor:pointer, looks like a button) but does nothing, report it as a BLOCKING interactive issue
 
-### 2d. Visual Quality Checks
-- Verify styles are loaded (not unstyled HTML)
-- Verify images/icons render (no broken image placeholders)
-- Verify text is readable (not overflowing, not clipped, proper contrast)
-- Judge design quality with a clear rubric: hierarchy, spacing, typography, density, responsiveness, motion polish, and premium feel
-- Verify responsive behavior at a narrower viewport and note any layout regressions
+### 2e. Animation & Motion Verification
+- If the app uses AnimeJS, Framer Motion, GSAP, or CSS animations:
+  1. Identify which elements should animate (page transitions, hover effects, loading skeletons, scroll reveals, etc.)
+  2. Take a screenshot BEFORE the animation trigger
+  3. Trigger the animation (navigate, scroll, hover, click)
+  4. Take a screenshot AFTER — verify the element moved/changed
+  5. Check that animations are SMOOTH: no janky jumps, no layout shifts during animation
+  6. Verify animations don't block interaction (user can still click during/after animation)
+- If animations are defined in code but do NOT fire in the browser, report it: "Animation for [component] exists in code but does not execute"
+- Check for AnimeJS specifically: look for elements with anime() calls — verify they actually animate
 
-### 2e. Console Error Audit
-- After visiting all pages, compile all console errors and warnings
-- Filter out non-critical warnings (deprecation notices, dev-mode warnings)
-- Focus on: uncaught exceptions, failed network requests, React errors, null/undefined access
+### 2f. Console Error Audit (THOROUGH)
+- Run browser_console_messages after EVERY page visit, not just at the end
+- Categorize each error:
+  - **BLOCKING**: uncaught exceptions, React "white screen" errors, null/undefined access that breaks rendering
+  - **MAJOR**: failed API calls (4xx/5xx), CORS errors, missing resources (404 for JS/CSS/images)
+  - **MINOR**: deprecation warnings, React dev-mode warnings, non-critical console.warn
+- For each BLOCKING/MAJOR error, report: the exact error message, which page/route it occurred on, and whether it affects the user experience
+- Count total errors per page
 
-## PHASE 3 — REPORT
+### 2g. Cross-Page Consistency
+- Verify the header/navigation is consistent across all pages
+- Verify footer (if any) appears on all pages
+- Check that the color scheme/theme is consistent (no page using different colors)
+- Check that font family and sizes are consistent across pages
+- Verify loading states: do pages show spinners/skeletons while data loads, or do they flash empty content?
+
+## PHASE 3 — DETAILED REPORT
 Use the Write tool to create VISUAL_TEST_REPORT.md with these EXACT sections:
+- ## Summary
 - ## Pages Tested
+- ## Responsive Testing Results
 - ## Interaction Coverage
+- ## Animation Verification
 - ## Console Errors
 - ## Visual Issues
 - ## Interactive Issues
+- ## Cross-Page Consistency
 - ## Design Assessment
 - ## Verdict
 
-Inside the report:
-- Pages Tested: list each URL visited, viewport, and pass/fail status
-- Interaction Coverage: list every major button, link, tab, input, or card you exercised and what happened
-- Console Errors: include uncaught exceptions, failed requests, and important warnings
-- Visual Issues: missing data, broken layouts, unstyled elements, poor responsive behavior
+Inside the report — BE SPECIFIC, not vague:
+- Summary: total pages tested, total issues found (blocking/major/minor), viewports tested
+- Pages Tested: table with columns: Route | URL | Desktop | Tablet | Mobile | Console Errors | Status
+- Responsive Testing Results: for each viewport breakpoint, list what breaks. Include "NONE" only if you verified all pages at that width.
+- Interaction Coverage: table with columns: Page | Element | Action | Expected Result | Actual Result | Status (PASS/FAIL)
+- Animation Verification: list each animation found, whether it fires, whether it's smooth, any issues
+- Console Errors: table with columns: Page | Error Type | Message | Severity (BLOCKING/MAJOR/MINOR)
+- Visual Issues: for each issue: page, element, description of what's wrong, expected behavior. NEVER say "no issues" without listing what you checked.
 - Interactive Issues: buttons that don't work, forms that don't submit, dead links, controls with no visible effect
-- Design Assessment: score the changed UI for hierarchy, spacing, typography, motion, responsiveness, and overall polish
+- Cross-Page Consistency: note any inconsistencies in navigation, colors, fonts, or layout patterns
+- Design Assessment: score the changed UI for hierarchy, spacing, typography, motion, responsiveness, and overall polish. Be critical — if something looks mediocre, say so.
 - Verdict: concise pass/fail summary with the blocking reasons if any
 
-## COMMON ISSUES TO CATCH
+## COMMON ISSUES TO CATCH (check for ALL of these)
 - Blank page on load (React didn't mount, JavaScript error)
 - Data-driven components showing "No data" or empty when database has records
 - Map markers at 0,0 (null coordinates not handled)
@@ -1662,11 +2037,28 @@ Inside the report:
 - Forms submitting but nothing happens (missing handler or API endpoint)
 - Links to routes that return 404
 - Duplicate React keys causing wrong element rendering
+- Overlapping elements (z-index issues, absolute positioning gone wrong)
+- Text color same as background (invisible text)
+- Buttons or links with no text/label (accessibility issue)
+- Horizontal scrollbar on mobile (content overflow)
+- Fixed/sticky elements covering content
+- Missing hover/focus states on interactive elements
+- Flash of unstyled content (FOUC)
+- Layout shift when images or fonts load
+- AnimeJS animations not firing (library loaded but targets not found)
 - Before finishing, verify that VISUAL_TEST_REPORT.md exists in the working directory. If it does not exist yet, write it before responding.
 
+## ANTI-PATTERNS — Do NOT do these:
+- Do NOT say "everything looks good" without evidence
+- Do NOT test only the home page and skip other routes
+- Do NOT skip responsive testing
+- Do NOT ignore console errors
+- Do NOT report "no issues found" without listing every check you performed
+- Do NOT pass the gate if you visited fewer than 80% of the routes in ARCHITECTURE.md
+
 FINAL LINE (required): End your response with EXACTLY one of:
-"QUALITY GATE: PASS" — app loads, all pages render, no console errors, interactions work
-"QUALITY GATE: FAIL — [issue1]; [issue2]" — visual or functional issues found`,
+"QUALITY GATE: PASS" — app loads, ALL pages render at ALL viewports, no blocking console errors, animations work, interactions verified
+"QUALITY GATE: FAIL — [issue1]; [issue2]" — visual, functional, or responsive issues found`,
       tools: ["Read", "Write", "Glob", "Grep", "Bash", ...PLAYWRIGHT_BROWSER_TOOLS],
       ...agentMdl("visual_tester"),
     },
@@ -1814,6 +2206,23 @@ async function runAgent(
       successfulAgents.add(agent);
       if (agent === "visual_tester") {
         visualTesterBrowserVerified = true;
+      }
+
+      // Emit pipeline structure for parallel mode after architect completes
+      if (agent === "architect") {
+        const breakdown = parseModuleBreakdown(projectConfig.workingDir);
+        if (breakdown && breakdown.modules.length >= 2) {
+          emit(projectId, {
+            type: "pipeline_structure" as const,
+            projectId,
+            timestamp: Date.now(),
+            data: {
+              agents: buildDynamicPipelineAgents(breakdown),
+              edges: buildDynamicPipelineEdges(breakdown),
+              parallelMode: true,
+            },
+          });
+        }
       }
     }
 
@@ -1976,26 +2385,9 @@ async function runAgent(
 
               // Detect subagent delegation
               if (block.name === "Task" || block.name === "Agent") {
-                const validAgents = ["product_manager", "architect", "developer", "database", "security", "error_checker", "tester", "reviewer", "deployer", "visual_tester"];
-                let agent = "unknown";
+                let agent = detectAgentType(block.input);
                 const st = block.input?.subagent_type;
-                console.log(`[orchestrator] ${projectId}: ${block.name} call subagent_type="${st}"`);
-
-                if (st && validAgents.includes(st)) {
-                  agent = st;
-                } else {
-                  const hint = (block.input?.description || block.input?.prompt || block.input?.task || "").toLowerCase();
-                  if (hint.includes("product") || hint.includes("prd") || hint.includes("requirement") || hint.includes("user stor")) agent = "product_manager";
-                  else if (hint.includes("architect") || hint.includes("design") || hint.includes("structure")) agent = "architect";
-                  else if (hint.includes("database") || hint.includes("schema") || hint.includes("migration") || hint.includes("sql")) agent = "database";
-                  else if (hint.includes("security") || hint.includes("owasp") || hint.includes("vuln") || hint.includes("secret")) agent = "security";
-                  else if (hint.includes("develop") || hint.includes("implement") || hint.includes("code")) agent = "developer";
-                  else if (hint.includes("error") || hint.includes("build") || hint.includes("compil") || hint.includes("lint") || hint.includes("type")) agent = "error_checker";
-                  else if (hint.includes("test") || hint.includes("qa") || hint.includes("coverage")) agent = "tester";
-                  else if (hint.includes("review") || hint.includes("quality") || hint.includes("refactor")) agent = "reviewer";
-                  else if (hint.includes("deploy") || hint.includes("docker") || hint.includes("readme") || hint.includes("ci") || hint.includes("github")) agent = "deployer";
-                  else if (hint.includes("visual") || hint.includes("browser") || hint.includes("playwright") || hint.includes("screenshot") || hint.includes("visual test")) agent = "visual_tester";
-                }
+                console.log(`[orchestrator] ${projectId}: ${block.name} call subagent_type="${st}" detected="${agent}"`);
 
                 activeTaskIds.add(block.id);
                 taskIdToAgent.set(block.id, agent);
@@ -2151,6 +2543,10 @@ export async function stopProject(projectId: string): Promise<void> {
   const project = await getProject(projectId);
   const q = activeProjects.get(projectId);
   if (q) { q.close(); activeProjects.delete(projectId); }
+
+  // Small delay to let child processes settle before cleanup
+  await new Promise((r) => setTimeout(r, 800));
+
   const cleanedListeners = project ? cleanupWorkingDirListeners(projectId, project.config.workingDir) : [];
   await updateProject(projectId, {
     status: "stopped",
@@ -2179,6 +2575,18 @@ export async function stopProject(projectId: string): Promise<void> {
       timestamp: Date.now(),
       data: { text: `Cleanup: closed local listeners ${cleanedListeners.join(", ")}`, isSubagent: false },
     });
+  }
+
+  // Second sweep after 3s — catches ports that opened between q.close() and first cleanup
+  if (project) {
+    setTimeout(() => {
+      try {
+        const late = cleanupWorkingDirListeners(projectId, project.config.workingDir);
+        if (late.length > 0) {
+          console.log(`[orchestrator] Late port cleanup for ${projectId}: ${late.join(", ")}`);
+        }
+      } catch { /* best effort */ }
+    }, 3000);
   }
 }
 
@@ -2221,9 +2629,14 @@ async function runResumedAgent(
   const taskIdToAgent = new Map<string, string>();
   const taskStartTimes = new Map<string, number>();
   const taskEvidence = new Map<string, TaskEvidence>();
+  const taskLastActivityAt = new Map<string, number>();
   const agentCompletionCount = new Map<string, number>();
   const agentStats: Record<string, AgentRunStat> = {};
   const agentMessages: Array<{ agent: string; text: string }> = [];
+  const rc = loadOrchestraRC(projectConfig.workingDir);
+  let runFailure: Error | null = null;
+  let stallWatchdog: NodeJS.Timeout | undefined;
+  let liveMessages: { close: () => void } | null = null;
 
   const finalizeResumedSubagentTask = (taskId: string, taskSuccess: boolean): void => {
     if (!activeTaskIds.has(taskId)) return;
@@ -2239,6 +2652,7 @@ async function runResumedAgent(
     taskIdToAgent.delete(taskId);
     taskStartTimes.delete(taskId);
     taskEvidence.delete(taskId);
+    taskLastActivityAt.delete(taskId);
 
     if (!agentStats[agent]) agentStats[agent] = { inputTokens: 0, outputTokens: 0, durationMs: 0 };
     agentStats[agent].durationMs = (agentStats[agent].durationMs || 0) + dur;
@@ -2284,9 +2698,33 @@ async function runResumedAgent(
     });
 
     activeProjects.set(projectId, messages);
+    liveMessages = messages;
     emit(projectId, { type: "project_started", projectId, timestamp: Date.now(), data: { sessionId } });
 
+    // Stall watchdog — kill resumed runs that stop making progress
+    stallWatchdog = setInterval(() => {
+      if (runFailure) return;
+      const now = Date.now();
+      for (const taskId of activeTaskIds) {
+        const lastActivity = taskLastActivityAt.get(taskId) || taskStartTimes.get(taskId) || now;
+        const agent = taskIdToAgent.get(taskId) || "unknown";
+        const stallTimeoutMs = getSubagentStallTimeoutMs(agent, rc);
+        if (now - lastActivity <= stallTimeoutMs) continue;
+        const stallSeconds = Math.round(stallTimeoutMs / 1000);
+        runFailure = new Error(`Subagent stalled: ${agent} exceeded ${stallSeconds}s without activity`);
+        emit(projectId, {
+          type: "agent_message",
+          projectId,
+          timestamp: Date.now(),
+          data: { text: `RUNTIME GATE FAIL (${agent}): stalled for more than ${stallSeconds}s without activity`, isSubagent: false },
+        });
+        liveMessages?.close();
+        break;
+      }
+    }, 5000);
+
     for await (const message of messages) {
+      if (runFailure) throw runFailure;
       if ("type" in message && message.type === "result") {
         for (const taskId of [...activeTaskIds]) {
           finalizeResumedSubagentTask(taskId, true);
@@ -2322,6 +2760,11 @@ async function runResumedAgent(
           }
         }
 
+        // Track subagent activity for stall detection
+        if (!isMainAgent && ast.parent_tool_use_id && activeTaskIds.has(ast.parent_tool_use_id)) {
+          taskLastActivityAt.set(ast.parent_tool_use_id, Date.now());
+        }
+
         const content = ast.message?.content ?? [];
         for (const block of content) {
           if (block.type === "text" && block.text) {
@@ -2348,6 +2791,10 @@ async function runResumedAgent(
             const actingAgent = !isMainAgent && ast.parent_tool_use_id
               ? (taskIdToAgent.get(ast.parent_tool_use_id) || "unknown")
               : undefined;
+            // Track tool use activity for stall detection
+            if (!isMainAgent && ast.parent_tool_use_id && activeTaskIds.has(ast.parent_tool_use_id)) {
+              taskLastActivityAt.set(ast.parent_tool_use_id, Date.now());
+            }
             if (!isMainAgent && ast.parent_tool_use_id) {
               const evidence = taskEvidence.get(ast.parent_tool_use_id);
               if (evidence) {
@@ -2369,25 +2816,7 @@ async function runResumedAgent(
             });
 
             if (isMainAgent && (block.name === "Task" || block.name === "Agent")) {
-              const validAgents = ["product_manager", "architect", "developer", "database", "security", "error_checker", "tester", "reviewer", "deployer", "visual_tester"];
-              let agent = "unknown";
-              const st = block.input?.subagent_type;
-
-              if (st && validAgents.includes(st)) {
-                agent = st;
-              } else {
-                const hint = (block.input?.description || block.input?.prompt || block.input?.task || "").toLowerCase();
-                if (hint.includes("product") || hint.includes("prd") || hint.includes("requirement") || hint.includes("user stor")) agent = "product_manager";
-                else if (hint.includes("architect") || hint.includes("design") || hint.includes("structure")) agent = "architect";
-                else if (hint.includes("database") || hint.includes("schema") || hint.includes("migration") || hint.includes("sql")) agent = "database";
-                else if (hint.includes("security") || hint.includes("owasp") || hint.includes("vuln") || hint.includes("secret")) agent = "security";
-                else if (hint.includes("develop") || hint.includes("implement") || hint.includes("code")) agent = "developer";
-                else if (hint.includes("error") || hint.includes("build") || hint.includes("compil") || hint.includes("lint") || hint.includes("type")) agent = "error_checker";
-                else if (hint.includes("test") || hint.includes("qa") || hint.includes("coverage")) agent = "tester";
-                else if (hint.includes("review") || hint.includes("quality") || hint.includes("refactor")) agent = "reviewer";
-                else if (hint.includes("deploy") || hint.includes("docker") || hint.includes("readme") || hint.includes("ci") || hint.includes("github")) agent = "deployer";
-                else if (hint.includes("visual") || hint.includes("browser") || hint.includes("playwright") || hint.includes("screenshot") || hint.includes("visual test")) agent = "visual_tester";
-              }
+              const agent = detectAgentType(block.input);
 
               activeTaskIds.add(block.id);
               taskIdToAgent.set(block.id, agent);
@@ -2451,12 +2880,15 @@ async function runResumedAgent(
     } catch {}
   } catch (error) {
     if (stoppingProjects.has(projectId)) return;
-    emit(projectId, { type: "project_error", projectId, timestamp: Date.now(), data: { error: String(error) } });
-    await updateProject(projectId, { status: "failed" });
+    const isEpipe = (error as NodeJS.ErrnoException)?.code === "EPIPE";
+    console.error(`[orchestrator] ${projectId} resume error${isEpipe ? " (EPIPE)" : ""}:`, String(error).slice(0, 300));
+    emit(projectId, { type: "project_error", projectId, timestamp: Date.now(), data: { error: isEpipe ? "Agent disconnected. Try again." : String(error) } });
+    await updateProject(projectId, { status: "failed", durationMs: Date.now() - startTime, numTurns }).catch(() => {});
     try {
       extractLessonsFromFeedback({ userMessage: prompt, agentMessages, techStack: projectConfig.techStack });
     } catch {}
   } finally {
+    if (stallWatchdog) clearInterval(stallWatchdog);
     activeProjects.delete(projectId);
     const cleanedListeners = cleanupWorkingDirListeners(projectId, projectConfig.workingDir);
     if (cleanedListeners.length > 0) {
@@ -2468,6 +2900,7 @@ async function runResumedAgent(
       });
     }
     stoppingProjects.delete(projectId);
+    console.log(`[orchestrator] ${projectId} resume finished`);
   }
 }
 
@@ -2483,14 +2916,18 @@ function buildAgentTeamTable(usesDB: boolean, pushGH: boolean, mode: "new" | "ex
 |-------|--------------|------|
 | Product Manager | \`product_manager\` | ${mode === "existing" ? "Repo audit + delta plan" : "PRD + requirements"} |
 | Architect | \`architect\` | ${mode === "existing" ? "Architecture delta + touched files" : "System design + file structure"} |
-| Developer | \`developer\` | Production code implementation |${usesDB ? `
+| Developer | \`developer\` | Production code implementation |
+| Foundation Dev | \`developer_foundation\` | Shared types, configs, layouts, utils |
+| Integrator | \`integrator\` | Cross-module wiring & build verification |${usesDB ? `
 | Database | \`database\` | ${mode === "existing" ? "Schema review + safe migrations" : "Schema, migrations, optimization"} |` : ""}
 | Security | \`security\` | Security review + remediation |
 | Error Checker | \`error_checker\` | Build, lint, typecheck, runtime validation |
 | Tester | \`tester\` | Regression and automated tests |
 | Reviewer | \`reviewer\` | Final code review |
 | Deployer | \`deployer\` | Scripts, CI/CD, docs${pushGH ? ", GitHub push" : ""} |
-| Visual Tester | \`visual_tester\` | Browser QA with Playwright |`;
+| Visual Tester | \`visual_tester\` | Browser QA with Playwright |
+
+When parallel mode is active, \`developer\` is used N times with \`[MODULE:id]\` in the description to spawn per-module developers.`;
 }
 
 function buildProjectSection(projectConfig: ProjectConfig, mode: "new" | "existing"): string {
@@ -2522,7 +2959,11 @@ function buildForwardPassSection(projectConfig: ProjectConfig, usesDB: boolean, 
 Forward pass — every enabled agent must run at least once:
 1. product_manager: audit the repository and write PRD.md as a delta change plan with scope boundaries, touched modules, risks, and verification expectations.
 2. architect: read PRD.md and write ARCHITECTURE.md with the minimal architecture delta, preserved contracts, touched files, and commands to run.
-3. developer: implement the requested change with minimal safe diffs after reading PRD.md, ARCHITECTURE.md, and the relevant source tree.${usesDB ? `
+3. IF ARCHITECTURE.md contains a <!-- MODULES --> block with 2+ modules:
+   3a. developer_foundation creates shared files.
+   3b. developer runs IN PARALLEL for each module — you MUST launch ALL module Tasks in ONE response so they execute concurrently. Never launch them one at a time.
+   3c. integrator wires everything and verifies build.
+   ELSE: single developer implements the change with minimal safe diffs.${usesDB ? `
 4. database: review the data layer and only introduce schema or seed changes if they are truly required; otherwise document that in DATABASE.md.` : ""}
 ${usesDB ? "5" : "4"}. error_checker and security run in the same phase.
 ${usesDB ? "6" : "5"}. tester.
@@ -2535,7 +2976,11 @@ ${usesDB ? "9" : "8"}. visual_tester using the URL from deployer output.`;
 Forward pass — every enabled agent must run at least once:
 1. product_manager writes PRD.md.
 2. architect writes ARCHITECTURE.md.
-3. developer implements the system module by module.${usesDB ? `
+3. IF ARCHITECTURE.md contains a <!-- MODULES --> block with 2+ modules:
+   3a. developer_foundation creates shared files.
+   3b. developer runs IN PARALLEL for each module — you MUST launch ALL module Tasks in ONE response so they execute concurrently. Never launch them one at a time.
+   3c. integrator wires everything and verifies build.
+   ELSE: single developer implements the system sequentially.${usesDB ? `
 4. database handles schema, migrations, and data setup.` : ""}
 ${usesDB ? "5" : "4"}. error_checker and security run in the same phase.
 ${usesDB ? "6" : "5"}. tester.
@@ -2557,12 +3002,22 @@ Every quality gate must end with exactly one of:
 - QUALITY GATE: FAIL — [issues]
 
 On FAIL, you must announce a feedback loop and route work as follows:
+
+Sequential mode (no MODULES block):
 - error_checker -> developer -> re-run error_checker
 - security -> developer -> re-run security
 - tester -> developer -> re-run tester
 - reviewer -> developer (do not re-run reviewer unless explicitly needed)
 - deployer startup failure -> error_checker, then developer if code changes are required, then re-verify deployer
 - visual_tester -> developer -> re-run visual_tester
+
+Parallel mode (MODULES block active):
+- error_checker -> identify affected module from error file paths -> route to specific developer [MODULE:id] OR integrator if cross-module -> re-run error_checker
+- security -> same routing as error_checker
+- tester -> same routing as error_checker
+- reviewer -> specific developer [MODULE:id] or integrator (do not re-run reviewer unless explicitly needed)
+- deployer startup failure -> error_checker, then specific developer or integrator if code changes are required, then re-verify deployer
+- visual_tester -> developer (foundation or specific module depending on issue scope) -> re-run visual_tester
 
 Use this announcement format exactly:
 "FEEDBACK LOOP [N]: Routing from [quality_gate] back to [target_agent] because: [reason]"
@@ -2664,7 +3119,9 @@ ${buildFeedbackLoopSection(mode)}
 ${buildHardRulesSection(totalAgents, stackGuardrails, mode)}
 
 ## VALID subagent_type VALUES
-"product_manager", "architect", "developer"${usesDB ? ', "database"' : ''}, "security", "error_checker", "tester", "reviewer", "deployer", "visual_tester"
+"product_manager", "architect", "developer", "developer_foundation", "integrator"${usesDB ? ', "database"' : ''}, "security", "error_checker", "tester", "reviewer", "deployer", "visual_tester"
+
+Note: "developer" with [MODULE:id] in the description (e.g. description="Implement Auth [MODULE:auth]") creates module-specific developers in parallel mode.
 
 ${buildUiUxSection(mode)}
 
@@ -2701,16 +3158,28 @@ ${hostPlatformSection}
 START NOW — execute the full existing-project pipeline:
 0. Task(subagent_type="product_manager", description="Audit repo and write delta change plan", prompt="Inspect the repository before planning. Read manifests, entrypoints, nearby modules, tests, routes, infra, and any files relevant to this request. Write PRD.md as a DELTA change plan for: ${projectConfig.businessNeed}. Include current-state summary, affected modules, acceptance criteria, explicit in-scope/out-of-scope boundaries, regression risks, and rollout notes. Do not propose a rewrite.")
 1. Task(subagent_type="architect", description="Design the minimal architecture delta", prompt="Read PRD.md and inspect the existing repo. Produce ARCHITECTURE.md focused on the architecture delta for: ${projectConfig.businessNeed}. Preserve existing patterns, list only touched/new files, note contracts to preserve, commands to run, and deployment or migration implications.")
-2. Task(subagent_type="developer", description="Implement the requested change with surgical edits", prompt="Read PRD.md and ARCHITECTURE.md, inspect the current source tree, and implement the requested change with minimal correct diffs. Preserve repo conventions. Requested change: ${projectConfig.businessNeed}. Constraints: ${projectConfig.technicalApproach}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.") [repeat per affected module]${usesDB ? `
+2. READ ARCHITECTURE.md completely. Look for the <!-- MODULES --> JSON block at the end.
+
+   IF ARCHITECTURE.md contains a <!-- MODULES --> block with 2+ modules:
+     2a. Task(subagent_type="developer_foundation", description="Create shared types, configs, layouts [FOUNDATION]", prompt="Read ARCHITECTURE.md. Create or update ALL files listed in sharedFiles. Install all dependencies. Preserve repo conventions. Do NOT implement module features. Requested change: ${projectConfig.businessNeed}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.")
+     2b. CRITICAL — You MUST launch ALL module Tasks in a SINGLE response. Do NOT wait for one module to finish before launching the next. Emit every Task call together in one message so they run concurrently:
+         For each module in the modules array: Task(subagent_type="developer", description="Implement [module.name] [MODULE:module.id]", prompt="Read ARCHITECTURE.md and PRD.md. Implement ONLY the [module.name] module with minimal correct diffs. Your scope is ONLY these files: [module.files list]. Import shared types/configs from the foundation — do NOT modify shared files. Preserve repo conventions. Requested change: ${projectConfig.businessNeed}. Constraints: ${projectConfig.technicalApproach}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.")
+     2c. WAIT for ALL module Tasks to complete, THEN launch integrator:
+         Task(subagent_type="integrator", description="Wire all modules together and verify build [INTEGRATOR]", prompt="All module developers finished. Read all source files. Fix cross-module conflicts, wire navigation/routes, ensure tsc --noEmit and npm run build pass. Make minimal targeted fixes only. Preserve repo conventions.")
+
+   ELSE (no modules block — single developer fallback):
+     2. Task(subagent_type="developer", description="Implement the requested change with surgical edits", prompt="Read PRD.md and ARCHITECTURE.md, inspect the current source tree, and implement the requested change with minimal correct diffs. Preserve repo conventions. Requested change: ${projectConfig.businessNeed}. Constraints: ${projectConfig.technicalApproach}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.") [repeat per affected module]
+${usesDB ? `
 3. Task(subagent_type="database", description="Review database impact for the existing repo", prompt="Read PRD.md and ARCHITECTURE.md, inspect the current data layer, and only introduce schema or migration changes if they are truly required. If no DB change is needed, write DATABASE.md stating that clearly and explain why.")` : ""}
-${usesDB ? "4" : "3"}. SAME RESPONSE: Task(subagent_type="error_checker", description="Validate build, lint, and runtime for the existing repo", prompt="Use the repository's real scripts first. Preferred lint/typecheck command: ${formatPromptValue(projectConfig.lintCommand)}. Preferred test command: ${formatPromptValue(projectConfig.testCommand)}. Preferred start command: ${formatPromptValue(projectConfig.startCommand)}. Fix issues with minimal diffs and verify the app still starts.") + Task(subagent_type="security", description="Audit changed areas and adjacent attack surface", prompt="Review the changed files plus nearby auth, data, input-validation, and dependency surfaces. Fix critical/high issues directly, but avoid unrelated rewrites.")
+${usesDB ? "4" : "3"}. CRITICAL — You MUST launch BOTH error_checker AND security in a SINGLE response. Do NOT launch one and wait for it to finish before the other. Emit both Task calls together so they run concurrently:
+   Task(subagent_type="error_checker", description="Validate build, lint, and runtime for the existing repo", prompt="Use the repository's real scripts first. Preferred lint/typecheck command: ${formatPromptValue(projectConfig.lintCommand)}. Preferred test command: ${formatPromptValue(projectConfig.testCommand)}. Preferred start command: ${formatPromptValue(projectConfig.startCommand)}. Fix issues with minimal diffs and verify the app still starts.") + Task(subagent_type="security", description="Audit changed areas and adjacent attack surface", prompt="Review the changed files plus nearby auth, data, input-validation, and dependency surfaces. Fix critical/high issues directly, but avoid unrelated rewrites.")
 ${usesDB ? "5" : "4"}. Task(subagent_type="tester", description="Write and run regression tests for the changed behavior", prompt="Use the repository's preferred test command when available: ${formatPromptValue(projectConfig.testCommand)}. Focus on regression coverage for the requested change, touched modules, and critical adjacent flows. Add tests to the existing framework instead of inventing a parallel test setup.")
 ${usesDB ? "6" : "5"}. Task(subagent_type="reviewer", description="Review changed files and impacted integration points", prompt="Review the implementation for regressions, contract mismatches, performance issues, maintainability problems, and missing tests. Focus on what changed and what it can break in the existing system.")
 ${usesDB ? "7" : "6"}. Task(subagent_type="deployer", description="Use existing scripts and verify the updated app", prompt="Use the repo's actual scripts, README patterns, and CI setup as the baseline. Preferred start command: ${formatPromptValue(projectConfig.startCommand)}. Consolidate report markdown files into ORCHESTRA_REPORT.md, verify the app runs, and report the exact URL used for verification. The orchestrator will clean up temporary local listeners after the full pipeline finishes.")
 ${usesDB ? "8" : "7"}. Task(subagent_type="visual_tester", description="Open the updated app in Chrome and test changed flows", prompt="Open the running app in Chrome. Test the changed routes and critical smoke flows from ARCHITECTURE.md. Check console errors, network failures, broken interactions, and visual regressions.")
 
 After each quality gate (Error Checker, Tester, Reviewer, Deployer, Visual Tester), READ their output.
-If they found unresolved issues → route back to Developer to fix → re-verify.
+If they found unresolved issues → identify the affected module from file paths → route back to the specific module Developer (or Integrator if cross-module) to fix → re-verify.
 Max 3 retries per gate. The goal is WORKING code with minimal safe diffs, not just "all agents ran."
 Announce each loop: "FEEDBACK LOOP [N]: Routing from [agent] back to [agent] because: [reason]"
 Visual Tester is mandatory and must use real browser MCP tools. If browser tools or the live URL are unavailable, that gate must fail.${stackGuardrails}
@@ -2731,16 +3200,28 @@ ${hostPlatformSection}
 START NOW — execute the full pipeline:
 0. Task(subagent_type="product_manager", description="Write PRD with user stories and requirements", prompt="Write PRD.md for: ${projectConfig.businessNeed}. Include user personas, 8+ user stories, functional requirements, non-functional requirements, and edge cases.")
 1. Task(subagent_type="architect", description="Design complete architecture", prompt="Read PRD.md then design the full system for: ${projectConfig.businessNeed}. Tech stack hint: ${projectConfig.techStack || 'pick the best'}. Produce ARCHITECTURE.md with file structure, data models, API contracts.")
-2. Task(subagent_type="developer", ...) [repeat per module after reading ARCHITECTURE.md and PRD.md]${usesDB ? `
+2. READ ARCHITECTURE.md completely. Look for the <!-- MODULES --> JSON block at the end.
+
+   IF ARCHITECTURE.md contains a <!-- MODULES --> block with 2+ modules:
+     2a. Task(subagent_type="developer_foundation", description="Create shared types, configs, layouts [FOUNDATION]", prompt="Read ARCHITECTURE.md. Create ALL files listed in sharedFiles. Install all dependencies. Do NOT implement module features.")
+     2b. CRITICAL — You MUST launch ALL module Tasks in a SINGLE response. Do NOT wait for one module to finish before launching the next. Emit every Task call together in one message so they run concurrently:
+         For each module in the modules array: Task(subagent_type="developer", description="Implement [module.name] [MODULE:module.id]", prompt="Read ARCHITECTURE.md and PRD.md. Implement ONLY the [module.name] module. Your scope is ONLY these files: [module.files list]. Import shared types/configs from the foundation — do NOT modify shared files.")
+     2c. WAIT for ALL module Tasks to complete, THEN launch integrator:
+         Task(subagent_type="integrator", description="Wire all modules together and verify build [INTEGRATOR]", prompt="All module developers finished. Read all source files. Fix cross-module conflicts, wire navigation/routes, ensure tsc --noEmit and npm run build pass. Make minimal targeted fixes only.")
+
+   ELSE (no modules block — single developer fallback):
+     2. Task(subagent_type="developer", ...) [implement everything sequentially]
+${usesDB ? `
 3. Task(subagent_type="database", ...) [schema, migrations, optimization]` : ""}
-${usesDB ? "4" : "3"}. SAME RESPONSE: Task(subagent_type="error_checker", ...) + Task(subagent_type="security", ...)
+${usesDB ? "4" : "3"}. CRITICAL — You MUST launch BOTH error_checker AND security in a SINGLE response. Do NOT wait for one to finish before launching the other:
+   Task(subagent_type="error_checker", ...) + Task(subagent_type="security", ...)
 ${usesDB ? "5" : "4"}. Task(subagent_type="tester", ...)
 ${usesDB ? "6" : "5"}. Task(subagent_type="reviewer", ...)
 ${usesDB ? "7" : "6"}. Task(subagent_type="deployer", ...)
 ${usesDB ? "8" : "7"}. Task(subagent_type="visual_tester", prompt="Open the running app in Chrome. Test all pages, check console for errors, click interactive elements, verify data renders.")
 
 After each quality gate (Error Checker, Tester, Reviewer, Deployer, Visual Tester), READ their output.
-If they found unresolved issues → route back to Developer to fix → re-verify.
+If they found unresolved issues → identify the affected module from file paths → route back to the specific module Developer (or Integrator if cross-module) to fix → re-verify.
 Max 3 retries per gate. The goal is WORKING code, not just "all agents ran."
 Announce each loop: "FEEDBACK LOOP [N]: Routing from [agent] back to [agent] because: [reason]"
 Visual Tester is mandatory and must use real browser MCP tools. If browser tools or the live URL are unavailable, that gate must fail.${stackGuardrails}

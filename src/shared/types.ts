@@ -11,7 +11,7 @@ export type ModelId =
   // Dated snapshots — use only when you need reproducibility
   | "claude-opus-4-5-20251101"
   | "claude-sonnet-4-5-20250929"
-  | "claude-haiku-3-5-20241022";
+  | "claude-haiku-4-5-20251001";
 
 /** Short aliases accepted for sub-agent model config */
 export type AgentModelAlias = "opus" | "sonnet" | "haiku" | "inherit";
@@ -24,7 +24,7 @@ export const MODEL_OPTIONS: { id: ModelId; label: string; short: string }[] = [
   // Dated snapshots — pinned versions
   { id: "claude-opus-4-5-20251101",   label: "Opus 4.5 (Nov 2025)",  short: "opus"   },
   { id: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5 (Sep 2025)",short: "sonnet" },
-  { id: "claude-haiku-3-5-20241022",  label: "Haiku 3.5 (Oct 2024)", short: "haiku"  },
+  { id: "claude-haiku-4-5-20251001",  label: "Haiku 4.5 (Oct 2025)", short: "haiku"  },
 ];
 
 export const AGENT_MODEL_OPTIONS: { id: AgentModelAlias; label: string }[] = [
@@ -34,18 +34,22 @@ export const AGENT_MODEL_OPTIONS: { id: AgentModelAlias; label: string }[] = [
   { id: "haiku",   label: "Haiku (fastest/cheapest)" },
 ];
 
-/** All 9 agent IDs in the pipeline (Phase 0 → Phase 4) */
+/** Agent IDs in the pipeline (Phase 0 → Phase 4).
+ *  Parallel dev mode adds developer_foundation, developer_module_*, and integrator. */
 export type AgentId =
-  | "product_manager"   // Phase 0 — PRD & requirements
-  | "architect"         // Phase 1 — system design
-  | "developer"         // Phase 2 — implementation hub
-  | "database"          // Phase 2b — optional, DB-heavy projects
-  | "error_checker"     // Phase 3 quality gates (hub spokes)
+  | "product_manager"        // Phase 0 — PRD & requirements
+  | "architect"              // Phase 1 — system design
+  | "developer"              // Phase 2 — implementation hub (single-dev fallback)
+  | "developer_foundation"   // Phase 2a — shared types, configs, layouts (parallel mode)
+  | "integrator"             // Phase 2c — cross-module wiring & build verification (parallel mode)
+  | `developer_module_${string}` // Phase 2b — per-module developer (parallel mode)
+  | "database"               // Phase 2b — optional, DB-heavy projects
+  | "error_checker"          // Phase 3 quality gates (hub spokes)
   | "security"
   | "tester"
   | "reviewer"
   | "deployer"
-  | "visual_tester";    // Final phase — browser testing via Playwright
+  | "visual_tester";         // Final phase — browser testing via Playwright
 
 // ── Config ──
 export interface OrchestraConfig {
@@ -145,6 +149,7 @@ export interface SubagentStartedEvent extends BaseEvent {
     agent: string;
     taskId: string;
     description?: string;
+    module?: string;
   };
 }
 
@@ -220,6 +225,22 @@ export interface UsageUpdateEvent extends BaseEvent {
   };
 }
 
+export interface PipelineStructureEvent extends BaseEvent {
+  type: "pipeline_structure";
+  data: {
+    agents: Array<{
+      id: string;
+      name: string;
+      icon: string;
+      role: string;
+      color: string;
+      phase: "planning" | "development" | "quality" | "deploy";
+    }>;
+    edges: Array<[string, string]>;
+    parallelMode: true;
+  };
+}
+
 export type OrchestraEvent =
   | ProjectStartedEvent
   | TaskProgressEvent
@@ -231,7 +252,8 @@ export type OrchestraEvent =
   | CostUpdateEvent
   | ProjectCompletedEvent
   | ProjectErrorEvent
-  | UsageUpdateEvent;
+  | UsageUpdateEvent
+  | PipelineStructureEvent;
 
 // ── WebSocket Messages (Client → Server) ──
 export interface InterventionMessage {

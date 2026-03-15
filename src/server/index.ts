@@ -24,12 +24,44 @@ process.on("uncaughtException", (err) => {
     console.error("[server] EPIPE caught (child process pipe broken) — ignoring");
     return;
   }
-  console.error("[server] Uncaught exception:", err);
+  // ECONNRESET is expected when a client disconnects abruptly — not fatal
+  if ((err as NodeJS.ErrnoException).code === "ECONNRESET") {
+    console.error("[server] ECONNRESET caught (client disconnected) — ignoring");
+    return;
+  }
+  console.error("[server] Uncaught exception:", err?.stack || err);
+  // Attempt to stop active projects (marks failed + cleans up ports) so they don't stay stuck
+  try {
+    const activeIds = getActiveProjectIds();
+    for (const pid of activeIds) {
+      console.error(`[server] Stopping project ${pid} due to uncaught exception`);
+      broadcast({ type: "project_error", projectId: pid, timestamp: Date.now(), data: { error: `Server error: ${String(err).slice(0, 200)}` } });
+      stopProject(pid).catch(() => {});
+    }
+  } catch { /* best effort */ }
 });
 
 process.on("unhandledRejection", (reason) => {
-  console.error("[server] Unhandled rejection:", reason);
+  console.error("[server] Unhandled rejection:", (reason as Error)?.stack || reason);
 });
+
+// ── Graceful shutdown: stop active projects (closes their ports) ──
+let shuttingDown = false;
+async function gracefulShutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal} received — stopping active projects and cleaning up ports…`);
+  try {
+    const ids = getActiveProjectIds();
+    await Promise.allSettled(ids.map((id) => stopProject(id)));
+    console.log(`[server] Cleaned up ${ids.length} project(s). Exiting.`);
+  } catch (err) {
+    console.error("[server] Cleanup error:", err);
+  }
+  process.exit(0);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 async function findAvailablePort(start: number): Promise<number> {
   return new Promise((resolve) => {

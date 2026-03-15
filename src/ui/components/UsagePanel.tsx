@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ClaudeUsageStats, type SubscriptionUsage } from "../lib/api-client";
 import { Activity, Zap, MessageSquare, Bot, AlertCircle, RefreshCw, Clock, Gauge, DollarSign } from "lucide-react";
+import { useStaggerReveal, useFadeIn } from "../hooks/useAnime";
 
 export default function UsagePanel() {
   const queryClient = useQueryClient();
@@ -23,6 +24,11 @@ export default function UsagePanel() {
     queryKey: ["config"],
     queryFn: () => api.getConfig(),
   });
+
+  // Hooks must be called unconditionally (before any early returns)
+  const metricsRef = useStaggerReveal<HTMLDivElement>([stats?.totalMessages], { delay: 150, stagger: 80, translateY: 14 });
+  const headerRef = useFadeIn<HTMLDivElement>({ duration: 500 });
+  const chartRef = useStaggerReveal<HTMLDivElement>([stats?.recentActivity?.length], { delay: 300, stagger: 50, translateY: 8 });
 
   if (isLoading) {
     return (
@@ -63,7 +69,7 @@ export default function UsagePanel() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div ref={headerRef} className="flex items-center justify-between">
         <h2 className="text-lg font-semibold flex items-center gap-2">
           <Activity className="w-5 h-5 text-violet-400" />
           <span className="gradient-text">Claude Usage</span>
@@ -230,7 +236,7 @@ export default function UsagePanel() {
       )}
 
       {/* Key metrics — unified grid, no duplicates */}
-      <div className="grid grid-cols-2 gap-3">
+      <div ref={metricsRef} className="grid grid-cols-2 gap-3">
         {config?.hasApiKey ? (
           <>
             {/* API users see cost */}
@@ -290,7 +296,7 @@ export default function UsagePanel() {
       {stats.recentActivity.length > 0 && (
         <div>
           <div className="text-xs text-neutral-500 mb-2">Last 7 days activity</div>
-          <div className="flex items-end gap-1 h-12">
+          <div ref={chartRef} className="flex items-end gap-1 h-12">
             {stats.recentActivity.map((day) => {
               const h = Math.max((day.messageCount / maxMsg) * 100, 4);
               return (

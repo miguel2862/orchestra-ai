@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 280" fill="none">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0c0815"/>
+      <stop offset="40%" stop-color="#16102b"/>
+      <stop offset="100%" stop-color="#0d1a25"/>
+    </linearGradient>
+    <linearGradient id="violetGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="50%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#7c3aed" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0"/>
+      <stop offset="20%" stop-color="#a78bfa" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#c084fc" stop-opacity="0.8"/>
+      <stop offset="80%" stop-color="#a78bfa" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="280" fill="url(#bgGrad)" rx="16"/>
+
+  <!-- Ambient glow behind logo -->
+  <ellipse cx="450" cy="110" rx="200" ry="80" fill="#7c3aed" opacity="0.06">
+    <animate attributeName="opacity" values="0.04;0.08;0.04" dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="rx" values="190;210;190" dur="4s" repeatCount="indefinite"/>
+  </ellipse>
+
+  <!-- Horizontal glow line -->
+  <rect x="100" y="185" width="700" height="1" fill="url(#lineGrad)">
+    <animate attributeName="opacity" values="0.4;0.8;0.4" dur="3s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Music note icon (conductor animation) -->
+  <g transform="translate(350, 70)" filter="url(#glow)">
+    <animateTransform attributeName="transform" type="rotate" values="-8,370,95;6,370,95;-3,370,95;0,370,95;-8,370,95" dur="3.2s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="scale" values="1;1.08;0.96;1" dur="3.2s" repeatCount="indefinite" additive="sum"/>
+    <path d="M12 3v15m0-15l8-1.5v13" stroke="url(#violetGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="9" cy="18" r="3.5" stroke="url(#violetGrad)" stroke-width="2.5" fill="none"/>
+    <circle cx="17" cy="16.5" r="3.5" stroke="url(#violetGrad)" stroke-width="2.5" fill="none"/>
+  </g>
+
+  <!-- Floating notes -->
+  <text x="330" y="75" font-size="14" fill="#a78bfa" opacity="0" font-family="serif">
+    <animate attributeName="opacity" values="0;0.8;0.6;0" dur="2.5s" begin="0.5s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="78;55" dur="2.5s" begin="0.5s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="330;318" dur="2.5s" begin="0.5s" repeatCount="indefinite"/>
+  </text>
+
+  <text x="395" y="68" font-size="12" fill="#c084fc" opacity="0" font-family="serif">
+    <animate attributeName="opacity" values="0;0.7;0.5;0" dur="2.8s" begin="1.2s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="68;48" dur="2.8s" begin="1.2s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="395;408" dur="2.8s" begin="1.2s" repeatCount="indefinite"/>
+  </text>
+
+  <text x="345" y="60" font-size="11" fill="#818cf8" opacity="0" font-family="serif">
+    <animate attributeName="opacity" values="0;0.6;0.4;0" dur="3s" begin="2s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="62;42" dur="3s" begin="2s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="345;335" dur="3s" begin="2s" repeatCount="indefinite"/>
+  </text>
+
+  <text x="380" y="72" font-size="10" fill="#a78bfa" opacity="0" font-family="serif">
+    <animate attributeName="opacity" values="0;0.7;0;0" dur="2.2s" begin="3s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="72;50" dur="2.2s" begin="3s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="380;392" dur="2.2s" begin="3s" repeatCount="indefinite"/>
+  </text>
+
+  <!-- Title: "Orchestra AI" -->
+  <text x="450" y="125" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="700" font-size="42" fill="url(#violetGrad)" filter="url(#glow)">
+    Orchestra AI
+    <animate attributeName="opacity" values="1;0.88;1" dur="3s" repeatCount="indefinite"/>
+  </text>
+
+  <!-- Subtitle -->
+  <text x="450" y="158" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="400" font-size="16" fill="#a3a3a3" letter-spacing="0.5">
+    From idea to verified app — powered by 10 AI agents
+  </text>
+
+  <!-- Bottom badges area -->
+  <!-- npm badge -->
+  <g transform="translate(255, 205)">
+    <rect width="78" height="26" rx="13" fill="#7c3aed" opacity="0.15" stroke="#7c3aed" stroke-opacity="0.3" stroke-width="1"/>
+    <text x="39" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#c084fc" font-weight="500">npm v0.4.0</text>
+  </g>
+  <!-- Node badge -->
+  <g transform="translate(345, 205)">
+    <rect width="80" height="26" rx="13" fill="#10b981" opacity="0.12" stroke="#10b981" stroke-opacity="0.25" stroke-width="1"/>
+    <text x="40" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#6ee7b7" font-weight="500">Node &gt;=18</text>
+  </g>
+  <!-- MIT badge -->
+  <g transform="translate(437, 205)">
+    <rect width="52" height="26" rx="13" fill="#3b82f6" opacity="0.12" stroke="#3b82f6" stroke-opacity="0.25" stroke-width="1"/>
+    <text x="26" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#93c5fd" font-weight="500">MIT</text>
+  </g>
+  <!-- Platform badge -->
+  <g transform="translate(501, 205)">
+    <rect width="145" height="26" rx="13" fill="#6366f1" opacity="0.12" stroke="#6366f1" stroke-opacity="0.25" stroke-width="1"/>
+    <text x="72" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#a5b4fc" font-weight="500">macOS / Win / Linux</text>
+  </g>
+
+  <!-- Pulsing dots decoration -->
+  <circle cx="150" cy="140" r="2" fill="#7c3aed" opacity="0.3">
+    <animate attributeName="opacity" values="0.1;0.4;0.1" dur="2.5s" repeatCount="indefinite"/>
+    <animate attributeName="r" values="1.5;2.5;1.5" dur="2.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="750" cy="140" r="2" fill="#7c3aed" opacity="0.3">
+    <animate attributeName="opacity" values="0.1;0.4;0.1" dur="2.5s" begin="1s" repeatCount="indefinite"/>
+    <animate attributeName="r" values="1.5;2.5;1.5" dur="2.5s" begin="1s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="200" cy="100" r="1.5" fill="#a78bfa" opacity="0.2">
+    <animate attributeName="opacity" values="0.1;0.3;0.1" dur="3s" begin="0.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="700" cy="100" r="1.5" fill="#a78bfa" opacity="0.2">
+    <animate attributeName="opacity" values="0.1;0.3;0.1" dur="3s" begin="1.5s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Bottom border gradient -->
+  <rect x="0" y="276" width="900" height="4" rx="2" fill="url(#lineGrad)">
+    <animate attributeName="opacity" values="0.5;1;0.5" dur="3s" repeatCount="indefinite"/>
+  </rect>
+</svg>

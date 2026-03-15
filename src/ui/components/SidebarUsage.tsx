@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, type ClaudeUsageStats, type SubscriptionUsage } from "../lib/api-client";
 import { Zap, Gauge } from "lucide-react";
+import { useFadeIn } from "../hooks/useAnime";
 
 /** Compact usage widget shown at the bottom of the sidebar */
 export default function SidebarUsage() {
@@ -20,6 +21,8 @@ export default function SidebarUsage() {
     refetchIntervalInBackground: true,
   });
 
+  const widgetRef = useFadeIn<HTMLButtonElement>({ duration: 600, translateY: 8, delay: 200 });
+
   if (!stats?.available && !sub?.available) return null;
 
   // Sparkline bars
@@ -28,6 +31,7 @@ export default function SidebarUsage() {
 
   return (
     <button
+      ref={widgetRef}
       onClick={() => navigate("/usage")}
       className="w-full p-3 border-t border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 transition-colors text-left"
     >

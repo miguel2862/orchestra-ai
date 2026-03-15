@@ -70,12 +70,20 @@
     --shadow-elevated: 0 8px 32px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04);
     --shadow-popup: 0 16px 48px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06);
 
-    --text-primary: #1a1a2e;
-    --text-secondary: #4a4a6a;
-    --text-muted: #8888a8;
+    --text-primary: #0a0a1a;
+    --text-secondary: #1a1a2e;
+    --text-muted: #4a4a5a;
   }
 
 }
+
+/* ── Light theme: force dark text for readability ── */
+[data-theme="light"] .text-neutral-300 { color: #1a1a2e !important; }
+[data-theme="light"] .text-neutral-400 { color: #2a2a3e !important; }
+[data-theme="light"] .text-neutral-500 { color: #3a3a4e !important; }
+[data-theme="light"] .text-neutral-600 { color: #4a4a5a !important; }
+[data-theme="light"] .text-neutral-100 { color: #0a0a1a !important; }
+[data-theme="light"] .text-neutral-200 { color: #1a1a2e !important; }
 
 /* ── Component Classes (outside @layer to avoid @apply restrictions) ── */
 

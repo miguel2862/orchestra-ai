@@ -97,6 +97,8 @@ export function setupApiRoutes(app: Express): void {
 
   app.delete("/api/projects/:id", async (req, res) => {
     try {
+      // Stop the project first (kills agents + cleans up ports) if still active
+      try { await stopProject(req.params.id); } catch { /* may not be active */ }
       const { workingDir } = await deleteProject(req.params.id);
       res.json({ ok: true, workingDir });
     } catch (error) {

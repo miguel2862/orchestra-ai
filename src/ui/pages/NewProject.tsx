@@ -6,6 +6,7 @@ import { api } from "../lib/api-client";
 import TemplateSelector from "../components/TemplateSelector";
 import HelpTip from "../components/HelpTip";
 import { MODEL_OPTIONS, AGENT_MODEL_OPTIONS } from "@shared/types";
+import { useStaggerReveal, useFadeIn } from "../hooks/useAnime";
 
 export default function NewProject() {
   const navigate = useNavigate();
@@ -40,6 +41,10 @@ export default function NewProject() {
 
   const hasGithubToken = !!config?.githubToken;
 
+  // Animations
+  const titleRef = useFadeIn<HTMLHeadingElement>({ duration: 500 });
+  const formRef = useStaggerReveal<HTMLDivElement>([], { delay: 100, stagger: 60, translateY: 16 });
+
   const set = (key: string, value: string | boolean) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
@@ -50,25 +55,25 @@ export default function NewProject() {
 
   return (
     <div className="max-w-2xl mx-auto p-8">
-      <h1 className="text-2xl font-bold mb-2 gradient-text">Project Setup</h1>
+      <h1 ref={titleRef} className="text-2xl font-bold mb-2 gradient-text">Project Setup</h1>
       <div className="flex items-center gap-2 text-xs text-neutral-500 mb-6">
         <Cpu className="w-3.5 h-3.5" />
         <span>Powered by Claude models with adaptive thinking</span>
       </div>
 
-      <div className="space-y-5">
+      <div ref={formRef} className="space-y-5">
         <div className="glass-card p-2 inline-flex gap-2">
           <button
             type="button"
             onClick={() => set("mode", "new")}
-            className={`px-3 py-2 rounded-xl text-sm transition ${!isExisting ? "bg-violet-500/20 text-violet-200 border border-violet-400/30" : "text-neutral-400 hover:text-neutral-200"}`}
+            className={`px-3 py-2 rounded-xl text-sm transition ${!isExisting ? "bg-violet-500/20 text-violet-700 dark:text-violet-200 border border-violet-400/30" : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"}`}
           >
             New Project
           </button>
           <button
             type="button"
             onClick={() => set("mode", "existing")}
-            className={`px-3 py-2 rounded-xl text-sm transition ${isExisting ? "bg-cyan-500/20 text-cyan-200 border border-cyan-400/30" : "text-neutral-400 hover:text-neutral-200"}`}
+            className={`px-3 py-2 rounded-xl text-sm transition ${isExisting ? "bg-cyan-500/20 text-cyan-700 dark:text-cyan-200 border border-cyan-400/30" : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"}`}
           >
             Existing Project
           </button>
