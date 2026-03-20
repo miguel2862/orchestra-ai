@@ -305,6 +305,12 @@ npm install -g orchestra-ai-app
 orchestra-ai
 ```
 
+### Update to latest
+
+```bash
+npm install -g orchestra-ai-app@latest
+```
+
 <details>
 <summary>Windows execution policy error?</summary>
 
