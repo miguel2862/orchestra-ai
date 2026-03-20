@@ -2,6 +2,11 @@ import { loadConfig, isConfigComplete } from "../server/config.js";
 import { DEFAULT_PORT } from "../shared/constants.js";
 import { execSync } from "node:child_process";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { createRequire } from "node:module";
+
+const _require = createRequire(import.meta.url);
+const PKG_NAME = "orchestra-ai-app";
+const CURRENT_VERSION: string = _require("../../package.json").version;
 
 // On Windows, npm global binaries are wrapped as .cmd files.
 // Try `claude` first (works on macOS/Linux and Windows via PATH), then `claude.cmd`.
@@ -255,7 +260,75 @@ async function ensureClaudeReady(): Promise<void> {
   }
 }
 
+async function checkForUpdate(): Promise<void> {
+  try {
+    const https = await import("node:https");
+    const latestVersion = await new Promise<string>((resolve, reject) => {
+      const req = https.default.get(
+        `https://registry.npmjs.org/${PKG_NAME}/latest`,
+        { timeout: 3000 },
+        (res) => {
+          let data = "";
+          res.on("data", (chunk) => (data += chunk));
+          res.on("end", () => {
+            try {
+              resolve(JSON.parse(data).version as string);
+            } catch {
+              reject(new Error("parse error"));
+            }
+          });
+        }
+      );
+      req.on("error", reject);
+      req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+    });
+
+    if (latestVersion === CURRENT_VERSION) return;
+
+    // Simple semver: latest > current?
+    const toNum = (v: string) => v.split(".").map(Number);
+    const [lMaj, lMin, lPat] = toNum(latestVersion);
+    const [cMaj, cMin, cPat] = toNum(CURRENT_VERSION);
+    const isNewer =
+      lMaj > cMaj ||
+      (lMaj === cMaj && lMin > cMin) ||
+      (lMaj === cMaj && lMin === cMin && lPat > cPat);
+    if (!isNewer) return;
+
+    const chalk = (await import("chalk")).default;
+    console.log(
+      chalk.yellow(`\n  ↑ Update available: ${CURRENT_VERSION} → ${latestVersion}\n`) +
+      chalk.dim(`    npm install -g ${PKG_NAME}\n`)
+    );
+
+    const { confirm } = await import("@inquirer/prompts");
+    const doUpdate = await confirm({
+      message: `Update to ${latestVersion} and reopen?`,
+      default: true,
+    });
+
+    if (!doUpdate) return;
+
+    console.log(chalk.dim(`\n  Installing ${PKG_NAME}@${latestVersion}...\n`));
+    execSync(`npm install -g ${PKG_NAME}@${latestVersion}`, { stdio: "inherit" });
+    console.log(chalk.green(`\n  ✓ Updated to ${latestVersion}. Restarting...\n`));
+
+    // Re-exec with the new binary
+    const { spawn } = await import("node:child_process");
+    const child = spawn("orchestra-ai", process.argv.slice(2), {
+      stdio: "inherit",
+      detached: false,
+    });
+    child.on("exit", (code) => process.exit(code ?? 0));
+    await new Promise(() => {}); // wait forever — child takes over
+  } catch {
+    // Silently skip — no network or registry issue shouldn't block startup
+  }
+}
+
 async function main(): Promise<void> {
+  await checkForUpdate();
+
   const config = loadConfig();
 
   if (!isConfigComplete(config)) {
