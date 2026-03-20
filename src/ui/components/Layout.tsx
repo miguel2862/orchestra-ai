@@ -161,7 +161,7 @@ export default function Layout() {
 
         <div className="sidebar-separator" />
         <div className="px-4 py-2.5 text-[10px] text-neutral-400 dark:text-neutral-600 tracking-wide">
-          Orchestra AI v4.1.0
+          Orchestra AI v{__APP_VERSION__}
         </div>
       </aside>
 
