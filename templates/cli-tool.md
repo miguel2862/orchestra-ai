@@ -42,3 +42,13 @@ You are building a command-line tool. Follow these guidelines:
 - Proper error messages (not raw stack traces)
 - Cross-platform compatibility (Windows/macOS/Linux)
 - Unit tests for core logic
+
+## Tools Available
+- Shell: `mcp__desktop-commander__*` tools for running commands
+
+## SUCCESS CRITERIA
+- CLI executes all defined commands without errors
+- `--help` output is present and accurate for every command
+- Exit codes are correct (0 for success, non-zero for errors)
+- All tests pass
+- Cross-platform compatibility verified (no Unix-only assumptions unless justified)

@@ -200,8 +200,8 @@ export async function runSetup(): Promise<void> {
     geminiApiKey = await input({
       message: "Gemini API Key (AIza...):",
       validate: (val) => {
-        if (!val) return true; // Allow empty to skip
-        return val.startsWith("AIza") ? true : "Must start with AIza";
+        if (!val) return true; // Empty = skip Gemini setup
+        return val.startsWith("AIza") ? true : "Must start with AIza...";
       },
     });
     if (geminiApiKey) {
@@ -320,7 +320,10 @@ export async function runPostUpdateSetup(existingConfig: OrchestraConfig): Promi
 
         const key = await input({
           message: "Gemini API Key (AIza..., or Enter to skip):",
-          validate: (v) => !v || v.startsWith("AIza") ? true : "Must start with AIza",
+          validate: (v) => {
+            if (!v) return true; // Empty = skip
+            return v.startsWith("AIza") ? true : "Must start with AIza...";
+          },
         });
         if (key) { existingConfig.geminiApiKey = key; updated = true; }
       }

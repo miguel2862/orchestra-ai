@@ -78,8 +78,8 @@ export async function precacheMcpServers(): Promise<void> {
     if (!pkg) continue;
     try {
       execSync(`npm cache add ${pkg}`, { stdio: "ignore", timeout: 30_000 });
-    } catch {
-      // Non-fatal: npx will download on first use
+    } catch (err) {
+      console.warn(`[mcp] Failed to cache ${pkg}:`, String(err).slice(0, 80));
     }
   }
 }

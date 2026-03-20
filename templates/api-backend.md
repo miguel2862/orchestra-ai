@@ -47,3 +47,14 @@ You are building a backend API service. Follow these guidelines:
 - Proper logging (structured, leveled)
 - Environment configuration with type-safe env parsing
 - Database migrations if applicable
+
+## Tools Available
+- Shell: `mcp__desktop-commander__*` tools for running commands
+- Browser: `mcp__playwright__*` tools for visual testing (if there's a UI component)
+
+## SUCCESS CRITERIA
+- All API endpoints respond correctly with proper HTTP status codes
+- Input validation rejects malformed requests with clear error messages
+- App starts successfully and responds to health check
+- All tests pass (`npm test` or equivalent)
+- No TypeScript errors (`tsc --noEmit` passes)

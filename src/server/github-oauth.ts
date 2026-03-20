@@ -43,6 +43,10 @@ interface ErrorResponse {
   error_description?: string;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function getGitHubDeviceFlowClientId(clientId?: string): string {
   return clientId?.trim() || process.env[GITHUB_CLIENT_ID_ENV]?.trim() || DEFAULT_GITHUB_CLIENT_ID;
 }
@@ -110,6 +114,7 @@ export async function pollForToken(
         device_code: deviceCode,
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       }),
+      signal: AbortSignal.timeout(10000),
     });
 
     if (!response.ok) {
@@ -161,8 +166,4 @@ export async function githubDeviceFlow(
     deviceResponse.expires_in,
     clientId,
   );
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -11,7 +11,10 @@ import { ensureConfigDir, getConfigDir, loadConfig } from "./config.js";
 
 const DEFAULT_ASPECT_RATIO = "1:1";
 const SUPPORTED_ASPECT_RATIOS = new Set(["1:1", "3:4", "4:3", "9:16", "16:9"]);
-const GEMINI_IMAGE_MODELS = ["gemini-2.5-flash-image", "gemini-3.1-flash-image-preview"];
+const GEMINI_IMAGE_MODELS = [
+  "gemini-2.5-flash-image",              // Stable
+  "gemini-3.1-flash-image-preview",      // Preview — may be deprecated; monitor Google's model lifecycle
+];
 const GEMINI_USAGE_PATH = join(getConfigDir(), "gemini-usage.json");
 
 interface GeminiUsage {
@@ -167,6 +170,34 @@ export async function generateImage(
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "unknown");
+        // Retry once for server errors (5xx)
+        if (response.status >= 500 && response.status < 600) {
+          console.warn(`[gemini] ${model} returned ${response.status}, retrying once...`);
+          await new Promise(r => setTimeout(r, 2000));
+          try {
+            const retryResponse = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+              {
+                method: "POST",
+                headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+                body: JSON.stringify(requestBody),
+              },
+            );
+            if (retryResponse.ok) {
+              const retryData = await retryResponse.json() as GeminiGenerateContentResponse;
+              const retryImagePart = extractInlineImagePart(retryData);
+              if (retryImagePart?.data) {
+                const extension = retryImagePart.mimeType === "image/png" ? "png" : "jpg";
+                const finalFilename = filename.includes(".") ? filename : `${filename}.${extension}`;
+                const filePath = join(outputDir, finalFilename);
+                mkdirSync(dirname(filePath), { recursive: true });
+                writeFileSync(filePath, Buffer.from(retryImagePart.data, "base64"));
+                mutateGeminiUsage((usage) => { usage.imagesGenerated += 1; usage.rateLimited = false; });
+                return { success: true, filePath, model };
+              }
+            }
+          } catch { /* retry failed, fall through */ }
+        }
         modelErrors.push(`${model}: ${response.status} ${errorText}`);
         continue;
       }

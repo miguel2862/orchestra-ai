@@ -1,4 +1,5 @@
-import { execSync } from "node:child_process";
+import { execSync, exec } from "node:child_process";
+import { promisify } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage, SDKAssistantMessage, SDKSystemMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,18 +15,12 @@ import { estimateCost } from "./cost-tracker.js";
 import { formatLessonsForPrompt, extractLessonsFromRun, extractLessonsFromFeedback, extractLessonsFromFeedbackLoops, extractLessonsFromRuntimeFailures } from "./lessons.js";
 import type { ProjectConfig, Project, ModelId, AgentModelAlias, AgentRunStat } from "../shared/types.js";
 
+const execAsync = promisify(exec);
+
 const activeProjects = new Map<string, { close: () => void }>();
 const pendingContinue = new Set<string>();
 const stoppingProjects = new Set<string>();
 const PLAYWRIGHT_BROWSER_TOOLS: string[] = [
-  "browser_navigate",
-  "browser_snapshot",
-  "browser_click",
-  "browser_type",
-  "browser_wait_for",
-  "browser_console_messages",
-  "browser_network_requests",
-  "browser_take_screenshot",
   "mcp__playwright__browser_navigate",
   "mcp__playwright__browser_snapshot",
   "mcp__playwright__browser_click",
@@ -64,6 +59,8 @@ const REQUIRED_PIPELINE_AGENTS: string[] = [
   "deployer",
   "visual_tester",
 ];
+// Default stall timeout — first run gets 1.5x to account for package installs.
+// Override per-agent via .orchestrarc: { "agents": { "developer": { "stallTimeoutMs": 900000 } } }
 const DEFAULT_SUBAGENT_STALL_TIMEOUT_MS = 10 * 60 * 1000;
 const LOCAL_URL_REGEX = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):(\d+)(?:[^\s)"`']*)?/gi;
 const RUNTIME_URL_REPORT_FILES = ["ORCHESTRA_REPORT.md", "VISUAL_TEST_REPORT.md", "TEST_REPORT.md"];
@@ -103,8 +100,11 @@ function parseModuleBreakdown(workingDir: string): ModuleBreakdown | null {
   const archPath = join(workingDir, "ARCHITECTURE.md");
   if (!existsSync(archPath)) return null;
   const content = readFileSync(archPath, "utf-8");
-  const match = content.match(/<!--\s*MODULES\s*-->\s*```json\s*([\s\S]*?)```\s*<!--\s*\/MODULES\s*-->/);
-  if (!match) return null;
+  const match = content.match(/<!--\s*MODULES\s*-->\s*```(?:json)?\s*([\s\S]*?)```\s*<!--\s*\/MODULES\s*-->/);
+  if (!match) {
+    console.log("[orchestrator] No MODULES block found in ARCHITECTURE.md — using single developer mode");
+    return null;
+  }
   try {
     const parsed = JSON.parse(match[1]);
     if (!Array.isArray(parsed.modules) || parsed.modules.length < 2) return null;
@@ -136,19 +136,19 @@ function detectAgentType(input: Record<string, unknown> | undefined): string {
 
   const hint = ((input.description || input.prompt || input.task || "") as string).toLowerCase();
   // Foundation and integrator must match BEFORE generic "develop"
-  if (hint.includes("foundation") || hint.includes("shared types") || hint.includes("shared files") || hint.includes("shared infrastructure")) return "developer_foundation";
-  if (hint.includes("integrat") || hint.includes("wire") || hint.includes("cross-module") || hint.includes("wiring")) return "integrator";
-  if (hint.includes("product") || hint.includes("prd") || hint.includes("requirement") || hint.includes("user stor")) return "product_manager";
-  if (hint.includes("architect") || hint.includes("design") || hint.includes("structure")) return "architect";
-  if (hint.includes("database") || hint.includes("schema") || hint.includes("migration") || hint.includes("sql")) return "database";
-  if (hint.includes("security") || hint.includes("owasp") || hint.includes("vuln") || hint.includes("secret")) return "security";
+  if (/\bfoundation\b/.test(hint) || /\bshared types\b/.test(hint) || /\bshared files\b/.test(hint) || /\bshared infrastructure\b/.test(hint)) return "developer_foundation";
+  if (/\bintegrat/.test(hint) || /\bwir(?:e|ing)\b/.test(hint) || /\bcross-module\b/.test(hint)) return "integrator";
+  if (/\bproduct\b/.test(hint) || /\bprd\b/.test(hint) || /\brequirement\b/.test(hint) || /\buser stor/.test(hint)) return "product_manager";
+  if (/\barchitect\b/.test(hint) || /\bdesign\b/.test(hint) || /\bstructure\b/.test(hint)) return "architect";
+  if (/\bdatabase\b/.test(hint) || /\bschema\b/.test(hint) || /\bmigration\b/.test(hint) || /\bsql\b/.test(hint)) return "database";
+  if (/\bsecurity\b/.test(hint) || /\bowasp\b/.test(hint) || /\bvuln/.test(hint) || /\bsecret\b/.test(hint)) return "security";
 
-  if (hint.includes("develop") || hint.includes("implement") || hint.includes("code")) return "developer";
-  if (hint.includes("error") || hint.includes("build") || hint.includes("compil") || hint.includes("lint") || hint.includes("type")) return "error_checker";
-  if (hint.includes("test") || hint.includes("qa") || hint.includes("coverage")) return "tester";
-  if (hint.includes("review") || hint.includes("quality") || hint.includes("refactor")) return "reviewer";
-  if (hint.includes("deploy") || hint.includes("docker") || hint.includes("readme") || hint.includes("ci") || hint.includes("github")) return "deployer";
-  if (hint.includes("visual") || hint.includes("browser") || hint.includes("playwright") || hint.includes("screenshot") || hint.includes("visual test")) return "visual_tester";
+  if (/\bdevelop/.test(hint) || /\bimplement/.test(hint) || /\bcode\b/.test(hint)) return "developer";
+  if (/\berror\b/.test(hint) || /\bbuild\b/.test(hint) || /\bcompil/.test(hint) || /\blint\b/.test(hint) || /\btype\b/.test(hint)) return "error_checker";
+  if (/\btest/.test(hint) || /\bqa\b/.test(hint) || /\bcoverage\b/.test(hint)) return "tester";
+  if (/\breview/.test(hint) || /\bquality\b/.test(hint) || /\brefactor/.test(hint)) return "reviewer";
+  if (/\bdeploy/.test(hint) || /\bdocker\b/.test(hint) || /\breadme\b/.test(hint) || /\bci\b/.test(hint) || /\bgithub\b/.test(hint)) return "deployer";
+  if (/\bvisual/.test(hint) || /\bbrowser\b/.test(hint) || /\bplaywright\b/.test(hint) || /\bscreenshot\b/.test(hint) || /\bvisual test/.test(hint)) return "visual_tester";
   return "unknown";
 }
 
@@ -499,17 +499,17 @@ function countToolEvidence(evidence: TaskEvidence | undefined, names: string[]):
 }
 
 function usedRequiredBrowserTools(usedTools?: Iterable<string>): boolean {
-  return hasToolEvidence(usedTools, ["browser_navigate", "mcp__playwright__browser_navigate"])
-    && hasToolEvidence(usedTools, ["browser_snapshot", "mcp__playwright__browser_snapshot"]);
+  return hasToolEvidence(usedTools, ["mcp__playwright__browser_navigate"])
+    && hasToolEvidence(usedTools, ["mcp__playwright__browser_snapshot"]);
 }
 
 function usedVisualTesterInteractionTools(usedTools?: Iterable<string>): boolean {
-  return hasToolEvidence(usedTools, ["browser_click", "mcp__playwright__browser_click", "browser_type", "mcp__playwright__browser_type"]);
+  return hasToolEvidence(usedTools, ["mcp__playwright__browser_click", "mcp__playwright__browser_type"]);
 }
 
 function usedVisualTesterDiagnosticTools(usedTools?: Iterable<string>): boolean {
-  return hasToolEvidence(usedTools, ["browser_console_messages", "mcp__playwright__browser_console_messages"])
-    && hasToolEvidence(usedTools, ["browser_take_screenshot", "mcp__playwright__browser_take_screenshot"]);
+  return hasToolEvidence(usedTools, ["mcp__playwright__browser_console_messages"])
+    && hasToolEvidence(usedTools, ["mcp__playwright__browser_take_screenshot"]);
 }
 
 function getVisualTesterReportFailures(workingDir: string): string[] {
@@ -668,7 +668,7 @@ function collectCleanupPorts(projectId: string, workingDir: string): number[] {
   return [...ports].sort((a, b) => a - b);
 }
 
-function cleanupListenersByPorts(ports: number[]): string[] {
+async function cleanupListenersByPorts(ports: number[]): Promise<string[]> {
   if (ports.length === 0) return [];
 
   try {
@@ -690,10 +690,10 @@ foreach ($port in $ports) {
 }
 $results | Sort-Object -Unique`;
 
-      const output = execSync(`powershell -NoProfile -Command ${JSON.stringify(script)}`, {
+      const { stdout } = await execAsync(`powershell -NoProfile -Command ${JSON.stringify(script)}`, {
         encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
+      });
+      const output = stdout.trim();
       return output ? output.split(/\r?\n+/).map((line) => line.trim()).filter(Boolean) : [];
     }
 
@@ -703,13 +703,11 @@ $results | Sort-Object -Unique`;
     echo "$pid:$port"
   done
 done | sort -u`;
-    const discovered = execSync(`bash -lc ${JSON.stringify(portScript)}`, {
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    if (!discovered) return [];
+    const { stdout: discovered } = await execAsync(`bash -lc ${JSON.stringify(portScript)}`);
+    const trimmedDiscovered = discovered.trim();
+    if (!trimmedDiscovered) return [];
 
-    const entries = discovered.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const entries = trimmedDiscovered.split(/\n+/).map((line) => line.trim()).filter(Boolean);
     const pids = [...new Set(entries.map((entry) => entry.split(":")[0]).filter(Boolean))];
     if (pids.length === 0) return entries;
 
@@ -718,19 +716,19 @@ sleep 1
 for pid in ${pids.join(" ")}; do
   kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
 done`;
-    execSync(`bash -lc ${JSON.stringify(cleanupScript)}`, { stdio: ["ignore", "ignore", "ignore"] });
+    await execAsync(`bash -lc ${JSON.stringify(cleanupScript)}`);
     return entries;
   } catch {
     return [];
   }
 }
 
-function cleanupWorkingDirListeners(projectId: string, workingDir: string): string[] {
-  const portMatches = cleanupListenersByPorts(collectCleanupPorts(projectId, workingDir));
+async function cleanupWorkingDirListeners(projectId: string, workingDir: string): Promise<string[]> {
+  const portMatches = await cleanupListenersByPorts(collectCleanupPorts(projectId, workingDir));
 
   // Also kill ALL processes (not just listeners) whose CWD or command line references the working dir.
   // This catches grandchild processes (Vite, webpack, etc.) that survive q.close().
-  const cwdKilled = killProcessesByWorkingDir(workingDir);
+  const cwdKilled = await killProcessesByWorkingDir(workingDir);
 
   if (portMatches.length > 0 || cwdKilled.length > 0 || process.platform === "win32") {
     return [...new Set([...portMatches, ...cwdKilled])];
@@ -748,10 +746,11 @@ lsof -nP -iTCP -sTCP:LISTEN -t 2>/dev/null | while read -r pid; do
       ;;
   esac
 done | sort -u`;
-    const discovered = execSync(`bash -lc ${JSON.stringify(discoverScript)}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    if (!discovered) return [];
+    const { stdout: discovered } = await execAsync(`bash -lc ${JSON.stringify(discoverScript)}`);
+    const trimmedDiscovered = discovered.trim();
+    if (!trimmedDiscovered) return [];
 
-    const entries = discovered.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const entries = trimmedDiscovered.split(/\n+/).map((line) => line.trim()).filter(Boolean);
     const pids = entries.map((entry) => entry.split(":")[0]).filter(Boolean);
     if (pids.length === 0) return [];
 
@@ -760,7 +759,7 @@ sleep 1
 for pid in ${pids.join(" ")}; do
   kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
 done`;
-    execSync(`bash -lc ${JSON.stringify(cleanupScript)}`, { stdio: ["ignore", "ignore", "ignore"] });
+    await execAsync(`bash -lc ${JSON.stringify(cleanupScript)}`);
     return entries;
   } catch {
     return [];
@@ -773,7 +772,7 @@ done`;
  * are grandchildren of the SDK process, so q.close() doesn't terminate them.
  * We avoid killing our own process (the Orchestra server) and its ancestors.
  */
-function killProcessesByWorkingDir(workingDir: string): string[] {
+async function killProcessesByWorkingDir(workingDir: string): Promise<string[]> {
   if (process.platform === "win32") return []; // Windows handled by cleanupListenersByPorts
 
   const myPid = process.pid;
@@ -796,15 +795,12 @@ ps -eo pid,comm 2>/dev/null | grep -E '(node|npm|npx|tsx|vite|esbuild|next|nuxt)
   esac
 done | sort -u`;
 
-    const discovered = execSync(`bash -lc ${JSON.stringify(script)}`, {
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 10000,
-    }).trim();
+    const { stdout: discovered } = await execAsync(`bash -lc ${JSON.stringify(script)}`, { timeout: 10000 });
+    const trimmedDiscovered = discovered.trim();
 
-    if (!discovered) return [];
+    if (!trimmedDiscovered) return [];
 
-    const entries = discovered.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+    const entries = trimmedDiscovered.split(/\n+/).map((l) => l.trim()).filter(Boolean);
     const pids = [...new Set(entries.map((e) => e.split(":")[0]).filter(Boolean))];
     if (pids.length === 0) return [];
 
@@ -815,7 +811,7 @@ sleep 1
 for pid in ${pids.join(" ")}; do
   kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
 done`;
-    execSync(`bash -lc ${JSON.stringify(killScript)}`, { stdio: ["ignore", "ignore", "ignore"], timeout: 10000 });
+    await execAsync(`bash -lc ${JSON.stringify(killScript)}`, { timeout: 10000 });
     return entries;
   } catch {
     return [];
@@ -1890,175 +1886,71 @@ FINAL LINE (required): End your response with EXACTLY one of:
     },
 
     visual_tester: {
-      description: "Visual QA engineer that opens the app in a real browser via Playwright to verify it works visually, catches console errors, tests responsive layouts, and validates user interactions across every route.",
-      prompt: `You are a senior visual QA engineer with 10+ years testing production web apps. You are RELENTLESS about finding bugs. You test web applications by ACTUALLY OPENING THEM in a real browser using Playwright MCP tools. You don't just read code — you interact with the live app like a real user would. Your job is to FIND PROBLEMS, not confirm things work. Assume something is broken until you prove otherwise.${repoModeNote}
+      description: "Visual QA engineer that opens the app in a real browser via Playwright MCP to verify it works visually, catches console errors, tests responsive layouts, and validates user interactions.",
+      prompt: `You are a visual QA engineer. Your job: open the running app in a REAL BROWSER using Playwright MCP tools, interact with it like a user, and find bugs that code review misses.${repoModeNote}
 
-## YOUR MISSION
-Open the running application in a browser, navigate to EVERY page and route, test at multiple viewport sizes, check for visual regressions, verify animations, audit console errors, and document every issue with exact details. Find issues that code review and unit tests miss: blank screens, missing data, broken layouts, console errors, non-functional buttons, overlapping elements, wrong colors, broken responsive behavior.
+## PLAYWRIGHT MCP TOOLS — YOU MUST USE THESE
+These are the exact tool names available to you via the Playwright MCP server:
+- mcp__playwright__browser_navigate — go to a URL
+- mcp__playwright__browser_snapshot — capture the page accessibility tree / DOM state
+- mcp__playwright__browser_take_screenshot — capture a visual screenshot
+- mcp__playwright__browser_click — click an element
+- mcp__playwright__browser_type — type text into an input
+- mcp__playwright__browser_console_messages — read console errors and warnings
 
-## HARD GATE
-- You MUST use Playwright MCP browser tools for this task.
-- Required browser evidence before you can pass: browser_navigate, multiple browser_snapshot calls, browser_console_messages, browser_take_screenshot, and repeated browser_click/browser_type interactions across the page.
-- If browser tools such as browser_navigate or browser_snapshot are unavailable, immediately fail with: "QUALITY GATE: FAIL — Playwright MCP browser tools unavailable".
-- If there is no live URL from the deployer or the app does not respond, fail the gate instead of guessing.
-- If a control looks interactive but clicking it produces no navigation, no DOM change, no modal, no request, and no visible state change, that is a FAIL.
-- You MUST test at least 3 different viewport widths (mobile ~375px, tablet ~768px, desktop ~1280px).
-- You MUST visit EVERY route listed in ARCHITECTURE.md — not just the home page.
-- "Looks good" is NEVER an acceptable finding. Be specific: what did you check, what did you see, what was the expected vs actual result.
+If these tools are not available, immediately fail: "QUALITY GATE: FAIL — Playwright MCP browser tools unavailable"
 
-## PHASE 1 — PREPARATION (do this BEFORE opening the browser)
-1. Read ARCHITECTURE.md CAREFULLY to extract:
-   - Every route/page (e.g., /, /dashboard, /settings, /profile, etc.)
-   - Every feature and interactive element mentioned
-   - Tech stack details (especially animation libraries like AnimeJS, Framer Motion, GSAP, etc.)
-   - Any design system or component library in use
-2. Read the Deployer's output to find the URL where the app is running (e.g., http://localhost:3000)
-3. Build a COMPLETE checklist of every route + feature you must test — write it down before proceeding
-4. If the app uses AnimeJS or other animation libraries, note which pages/components have animations
+## RUNTIME GATE MINIMUMS (you will be rejected without these)
+- Navigate to at least 2 different URLs
+- Take at least 4 browser snapshots across pages
+- Take at least 3 screenshots at different viewport widths (375px, 768px, 1280px)
+- Perform at least 5 click or type interactions
+- Check console messages on every page visited
+- Write VISUAL_TEST_REPORT.md before finishing
 
-## PHASE 2 — SYSTEMATIC BROWSER TESTING (use Playwright MCP tools)
+## STEP-BY-STEP WORKFLOW
 
-### 2a. Initial Load & First Impressions
-- Navigate to the main URL using browser_navigate
-- Take a screenshot using browser_take_screenshot IMMEDIATELY — this is your baseline
-- Take an accessibility snapshot using browser_snapshot to verify the page structure
-- Check console for errors using browser_console_messages — record ALL errors and warnings
-- Verify the page is NOT blank — it should have visible content, navigation, and styled elements
-- Check: does the page have a proper title? Is there a favicon? Does CSS load fully?
+### 1. Find the app URL and routes
+- Read ARCHITECTURE.md to get the list of routes
+- Read ORCHESTRA_REPORT.md or check deployer output for the running URL
+- If unsure, try: http://localhost:3000 or http://localhost:5173
 
-### 2b. EXHAUSTIVE Page Navigation — Visit EVERY Route
-- For EACH route in your checklist from Phase 1:
-  1. Navigate to it (click links or direct URL using browser_navigate)
-  2. Take browser_snapshot to verify content renders
-  3. Take browser_take_screenshot for visual evidence
-  4. Check console for NEW errors using browser_console_messages
-  5. Check for these SPECIFIC problems:
-     - **Missing content**: sections that should have data but show empty/placeholder
-     - **Broken layouts**: elements overlapping, overflowing containers, misaligned grids
-     - **Wrong colors**: text hard to read, missing theme colors, inconsistent palette
-     - **Missing images**: broken image icons, images that fail to load
-     - **Typography issues**: text truncated, wrong font sizes, unreadable small text
-     - **Spacing issues**: elements cramped together or with excessive gaps
-  6. Verify data displays: tables should have rows, charts should have data points, maps should have markers/layers
-  7. Cover the page top, mid, and bottom. Scroll down and take additional snapshots to check below-the-fold content.
-- If a route returns 404 or shows an error page, that is a BLOCKING issue — report the exact URL and error.
-- Track which routes you visited vs which you found in ARCHITECTURE.md. Report any routes you could NOT reach.
+### 2. Test each route in the browser
+For EACH route do ALL of these in order:
+a) mcp__playwright__browser_navigate to the URL
+b) mcp__playwright__browser_snapshot to verify content rendered (snapshot #1 for this page)
+c) mcp__playwright__browser_take_screenshot for visual evidence
+d) mcp__playwright__browser_console_messages to check for errors
+e) mcp__playwright__browser_click on interactive elements (buttons, links, nav, tabs) — on static pages with no forms, click at least one nav link or heading
+f) mcp__playwright__browser_type into any input fields (skip only if truly no inputs exist)
+g) mcp__playwright__browser_snapshot AGAIN to capture final page state (snapshot #2 for this page) — REQUIRED even on static pages
 
-### 2c. Responsive Testing — THREE Viewports Per Critical Page
-For EACH critical page (at minimum: home, main dashboard/listing, and one detail/form page):
-1. **Desktop (1280px wide)**: take screenshot, check layout is using full width appropriately
-2. **Tablet (768px wide)**: use browser_resize or navigate with viewport params, take screenshot, check:
-   - Navigation collapses to hamburger menu or adapts
-   - Grid layouts adjust (e.g., 3-column to 2-column)
-   - No horizontal scrollbar appears
-   - Text remains readable, buttons remain tappable size
-3. **Mobile (375px wide)**: take screenshot, check:
-   - Single column layout
-   - No content overflows the viewport
-   - Touch targets are at least 44px
-   - Forms are usable (inputs full width, labels visible)
-   - No elements hidden behind other elements
-Report EVERY layout breakage with: page URL, viewport width, what broke, and where on the page.
+IMPORTANT: You MUST take 2 snapshots per page (one on arrival, one after step e/f). With 2 pages this gives you the minimum of 4. Never leave a page without step g.
 
-### 2d. Interactive Elements — Click EVERYTHING
-- Click every major CTA, nav link, tab, accordion, modal trigger, and form control. Minimum: 5 meaningful interactions per page, more if the page exposes more controls.
-- After EACH interaction, verify an observable effect:
-  - Take browser_snapshot to detect DOM changes
-  - Check: URL change? New content rendered? Modal opened? Form submitted? Error shown?
-  - If NOTHING happened, report it: "Clicked [element] at [location] — no visible effect"
-- Test form inputs: type text, select dropdowns, toggle checkboxes, and confirm the UI reacts
-- Test navigation: all nav links work, breadcrumbs work, back button works, no dead ends
-- Test edge cases: click the same button twice, submit empty forms, type very long text
-- On maps: verify markers/clusters are visible, popups work on click, and changed layers respond to interaction
-- On charts: verify tooltips or drill-down interactions appear on hover/click
-- If an element appears clickable (has cursor:pointer, looks like a button) but does nothing, report it as a BLOCKING interactive issue
+### 3. Responsive testing
+Test at least 3 viewports on critical pages. Use Bash to resize or re-navigate:
+- Desktop: 1280px — take screenshot
+- Tablet: 768px — take screenshot
+- Mobile: 375px — take screenshot
+Report layout breakages: overlaps, overflow, unreadable text, hidden elements.
 
-### 2e. Animation & Motion Verification
-- If the app uses AnimeJS, Framer Motion, GSAP, or CSS animations:
-  1. Identify which elements should animate (page transitions, hover effects, loading skeletons, scroll reveals, etc.)
-  2. Take a screenshot BEFORE the animation trigger
-  3. Trigger the animation (navigate, scroll, hover, click)
-  4. Take a screenshot AFTER — verify the element moved/changed
-  5. Check that animations are SMOOTH: no janky jumps, no layout shifts during animation
-  6. Verify animations don't block interaction (user can still click during/after animation)
-- If animations are defined in code but do NOT fire in the browser, report it: "Animation for [component] exists in code but does not execute"
-- Check for AnimeJS specifically: look for elements with anime() calls — verify they actually animate
+### 4. Write VISUAL_TEST_REPORT.md
+Use the Write tool. Include these EXACT section headers:
+## Summary
+## Pages Tested
+## Responsive Testing Results
+## Interaction Coverage
+## Animation Verification
+## Console Errors
+## Visual Issues
+## Interactive Issues
+## Cross-Page Consistency
+## Design Assessment
+## Verdict
 
-### 2f. Console Error Audit (THOROUGH)
-- Run browser_console_messages after EVERY page visit, not just at the end
-- Categorize each error:
-  - **BLOCKING**: uncaught exceptions, React "white screen" errors, null/undefined access that breaks rendering
-  - **MAJOR**: failed API calls (4xx/5xx), CORS errors, missing resources (404 for JS/CSS/images)
-  - **MINOR**: deprecation warnings, React dev-mode warnings, non-critical console.warn
-- For each BLOCKING/MAJOR error, report: the exact error message, which page/route it occurred on, and whether it affects the user experience
-- Count total errors per page
+Be specific in every section — state what you checked, what you found, expected vs actual.
 
-### 2g. Cross-Page Consistency
-- Verify the header/navigation is consistent across all pages
-- Verify footer (if any) appears on all pages
-- Check that the color scheme/theme is consistent (no page using different colors)
-- Check that font family and sizes are consistent across pages
-- Verify loading states: do pages show spinners/skeletons while data loads, or do they flash empty content?
-
-## PHASE 3 — DETAILED REPORT
-Use the Write tool to create VISUAL_TEST_REPORT.md with these EXACT sections:
-- ## Summary
-- ## Pages Tested
-- ## Responsive Testing Results
-- ## Interaction Coverage
-- ## Animation Verification
-- ## Console Errors
-- ## Visual Issues
-- ## Interactive Issues
-- ## Cross-Page Consistency
-- ## Design Assessment
-- ## Verdict
-
-Inside the report — BE SPECIFIC, not vague:
-- Summary: total pages tested, total issues found (blocking/major/minor), viewports tested
-- Pages Tested: table with columns: Route | URL | Desktop | Tablet | Mobile | Console Errors | Status
-- Responsive Testing Results: for each viewport breakpoint, list what breaks. Include "NONE" only if you verified all pages at that width.
-- Interaction Coverage: table with columns: Page | Element | Action | Expected Result | Actual Result | Status (PASS/FAIL)
-- Animation Verification: list each animation found, whether it fires, whether it's smooth, any issues
-- Console Errors: table with columns: Page | Error Type | Message | Severity (BLOCKING/MAJOR/MINOR)
-- Visual Issues: for each issue: page, element, description of what's wrong, expected behavior. NEVER say "no issues" without listing what you checked.
-- Interactive Issues: buttons that don't work, forms that don't submit, dead links, controls with no visible effect
-- Cross-Page Consistency: note any inconsistencies in navigation, colors, fonts, or layout patterns
-- Design Assessment: score the changed UI for hierarchy, spacing, typography, motion, responsiveness, and overall polish. Be critical — if something looks mediocre, say so.
-- Verdict: concise pass/fail summary with the blocking reasons if any
-
-## COMMON ISSUES TO CATCH (check for ALL of these)
-- Blank page on load (React didn't mount, JavaScript error)
-- Data-driven components showing "No data" or empty when database has records
-- Map markers at 0,0 (null coordinates not handled)
-- Charts rendering with no data (axis labels but empty graph)
-- Console errors: "Cannot read property of undefined" (missing null checks)
-- Broken images (wrong path or missing file)
-- Forms submitting but nothing happens (missing handler or API endpoint)
-- Links to routes that return 404
-- Duplicate React keys causing wrong element rendering
-- Overlapping elements (z-index issues, absolute positioning gone wrong)
-- Text color same as background (invisible text)
-- Buttons or links with no text/label (accessibility issue)
-- Horizontal scrollbar on mobile (content overflow)
-- Fixed/sticky elements covering content
-- Missing hover/focus states on interactive elements
-- Flash of unstyled content (FOUC)
-- Layout shift when images or fonts load
-- AnimeJS animations not firing (library loaded but targets not found)
-- Before finishing, verify that VISUAL_TEST_REPORT.md exists in the working directory. If it does not exist yet, write it before responding.
-
-## ANTI-PATTERNS — Do NOT do these:
-- Do NOT say "everything looks good" without evidence
-- Do NOT test only the home page and skip other routes
-- Do NOT skip responsive testing
-- Do NOT ignore console errors
-- Do NOT report "no issues found" without listing every check you performed
-- Do NOT pass the gate if you visited fewer than 80% of the routes in ARCHITECTURE.md
-
-FINAL LINE (required): End your response with EXACTLY one of:
-"QUALITY GATE: PASS" — app loads, ALL pages render at ALL viewports, no blocking console errors, animations work, interactions verified
-"QUALITY GATE: FAIL — [issue1]; [issue2]" — visual, functional, or responsive issues found`,
+FINAL LINE (required): "QUALITY GATE: PASS" or "QUALITY GATE: FAIL — [issues]"`,
       tools: ["Read", "Write", "Glob", "Grep", "Bash", ...PLAYWRIGHT_BROWSER_TOOLS],
       ...agentMdl("visual_tester"),
     },
@@ -2100,6 +1992,12 @@ export async function startProject(projectConfig: ProjectConfig): Promise<{ proj
     }
     if (!existsSync(projectConfig.workingDir)) {
       throw new Error(`Existing project path not found: ${projectConfig.workingDir}`);
+    }
+    // I4: Validate it looks like a real project
+    const projectMarkers = ["package.json", ".git", "pyproject.toml", "Cargo.toml", "go.mod", "Makefile", "pom.xml", "build.gradle"];
+    const hasMarker = projectMarkers.some(m => existsSync(join(projectConfig.workingDir, m)));
+    if (!hasMarker) {
+      console.warn(`[orchestrator] Warning: ${projectConfig.workingDir} has no recognized project markers (${projectMarkers.join(", ")}). Proceeding anyway.`);
     }
   } else if (!projectConfig.workingDir) {
     const base = config.defaultWorkingDir || join(homedir(), "orchestra-projects");
@@ -2477,7 +2375,7 @@ async function runAgent(
   } finally {
     if (stallWatchdog) clearInterval(stallWatchdog);
     activeProjects.delete(projectId);
-    const cleanedListeners = cleanupWorkingDirListeners(projectId, projectConfig.workingDir);
+    const cleanedListeners = await cleanupWorkingDirListeners(projectId, projectConfig.workingDir);
     if (cleanedListeners.length > 0) {
       emit(projectId, {
         type: "agent_message",
@@ -2547,7 +2445,7 @@ export async function stopProject(projectId: string): Promise<void> {
   // Small delay to let child processes settle before cleanup
   await new Promise((r) => setTimeout(r, 800));
 
-  const cleanedListeners = project ? cleanupWorkingDirListeners(projectId, project.config.workingDir) : [];
+  const cleanedListeners = project ? await cleanupWorkingDirListeners(projectId, project.config.workingDir) : [];
   await updateProject(projectId, {
     status: "stopped",
     result: "Stopped by user.",
@@ -2579,9 +2477,9 @@ export async function stopProject(projectId: string): Promise<void> {
 
   // Second sweep after 3s — catches ports that opened between q.close() and first cleanup
   if (project) {
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        const late = cleanupWorkingDirListeners(projectId, project.config.workingDir);
+        const late = await cleanupWorkingDirListeners(projectId, project.config.workingDir);
         if (late.length > 0) {
           console.log(`[orchestrator] Late port cleanup for ${projectId}: ${late.join(", ")}`);
         }
@@ -2890,7 +2788,7 @@ async function runResumedAgent(
   } finally {
     if (stallWatchdog) clearInterval(stallWatchdog);
     activeProjects.delete(projectId);
-    const cleanedListeners = cleanupWorkingDirListeners(projectId, projectConfig.workingDir);
+    const cleanedListeners = await cleanupWorkingDirListeners(projectId, projectConfig.workingDir);
     if (cleanedListeners.length > 0) {
       emit(projectId, {
         type: "agent_message",
@@ -2936,8 +2834,8 @@ function buildProjectSection(projectConfig: ProjectConfig, mode: "new" | "existi
 - Mode: existing project continuation
 - Name: ${projectConfig.name}
 - Repo Path: ${projectConfig.workingDir}
-- Requested Change: ${projectConfig.businessNeed}
-- Constraints: ${projectConfig.technicalApproach}
+- Requested Change: ${sanitizePromptInput(projectConfig.businessNeed)}
+- Constraints: ${sanitizePromptInput(projectConfig.technicalApproach)}
 - Current State: ${formatPromptValue(projectConfig.currentState)}
 - Preferred Start Command: ${formatPromptValue(projectConfig.startCommand)}
 - Preferred Test Command: ${formatPromptValue(projectConfig.testCommand)}
@@ -2948,98 +2846,46 @@ function buildProjectSection(projectConfig: ProjectConfig, mode: "new" | "existi
 
   return `## PROJECT
 - Name: ${projectConfig.name}
-- Need: ${projectConfig.businessNeed}
-- Constraints: ${projectConfig.technicalApproach}
+- Need: ${sanitizePromptInput(projectConfig.businessNeed)}
+- Constraints: ${sanitizePromptInput(projectConfig.technicalApproach)}
 - Stack: ${projectConfig.techStack || "Architect decides"}`;
 }
 
 function buildForwardPassSection(projectConfig: ProjectConfig, usesDB: boolean, mode: "new" | "existing"): string {
-  if (mode === "existing") {
-    return `## PIPELINE
-Forward pass — every enabled agent must run at least once:
-1. product_manager: audit the repository and write PRD.md as a delta change plan with scope boundaries, touched modules, risks, and verification expectations.
-2. architect: read PRD.md and write ARCHITECTURE.md with the minimal architecture delta, preserved contracts, touched files, and commands to run.
-3. IF ARCHITECTURE.md contains a <!-- MODULES --> block with 2+ modules:
-   3a. developer_foundation creates shared files.
-   3b. developer runs IN PARALLEL for each module — you MUST launch ALL module Tasks in ONE response so they execute concurrently. Never launch them one at a time.
-   3c. integrator wires everything and verifies build.
-   ELSE: single developer implements the change with minimal safe diffs.${usesDB ? `
-4. database: review the data layer and only introduce schema or seed changes if they are truly required; otherwise document that in DATABASE.md.` : ""}
-${usesDB ? "5" : "4"}. error_checker and security run in the same phase.
-${usesDB ? "6" : "5"}. tester.
-${usesDB ? "7" : "6"}. reviewer.
-${usesDB ? "8" : "7"}. deployer.
-${usesDB ? "9" : "8"}. visual_tester using the URL from deployer output.`;
-  }
-
+  const modeNote = mode === "existing" ? " (delta-only, audit first)" : "";
   return `## PIPELINE
-Forward pass — every enabled agent must run at least once:
-1. product_manager writes PRD.md.
-2. architect writes ARCHITECTURE.md.
-3. IF ARCHITECTURE.md contains a <!-- MODULES --> block with 2+ modules:
-   3a. developer_foundation creates shared files.
-   3b. developer runs IN PARALLEL for each module — you MUST launch ALL module Tasks in ONE response so they execute concurrently. Never launch them one at a time.
-   3c. integrator wires everything and verifies build.
-   ELSE: single developer implements the system sequentially.${usesDB ? `
-4. database handles schema, migrations, and data setup.` : ""}
-${usesDB ? "5" : "4"}. error_checker and security run in the same phase.
-${usesDB ? "6" : "5"}. tester.
-${usesDB ? "7" : "6"}. reviewer.
-${usesDB ? "8" : "7"}. deployer.
-${usesDB ? "9" : "8"}. visual_tester using the live URL from deployer.`;
+Forward pass — every agent runs at least once${modeNote}:
+1. product_manager → PRD.md
+2. architect → ARCHITECTURE.md
+3. IF <!-- MODULES --> block exists with 2+ modules: developer_foundation → parallel module developers (launch ALL in ONE response) → integrator. ELSE: single developer.${usesDB ? `
+4. database → schema/migrations if needed.` : ""}
+${usesDB ? "5" : "4"}. error_checker + security (launch both in one response).
+${usesDB ? "6" : "5"}. tester
+${usesDB ? "7" : "6"}. reviewer
+${usesDB ? "8" : "7"}. deployer — starts the app, reports the live URL
+${usesDB ? "9" : "8"}. visual_tester — IMPORTANT: read the deployer URL and ARCHITECTURE.md routes, pass both in the Task prompt so it can use Playwright browser tools.`;
 }
 
 function buildFeedbackLoopSection(mode: "new" | "existing"): string {
-  const developerFix = mode === "existing"
-    ? "Fix with minimal safe diffs, preserve conventions, and avoid unrelated rewrites."
-    : "Fix the source with targeted changes only."
-  const visualFix = mode === "existing"
-    ? "Fix only the changed flows and regressions without disturbing stable areas."
-    : "Fix the visual and functional issues found in browser QA."
   return `## QUALITY GATES
-Every quality gate must end with exactly one of:
-- QUALITY GATE: PASS
-- QUALITY GATE: FAIL — [issues]
+Every quality gate agent ends with: "QUALITY GATE: PASS" or "QUALITY GATE: FAIL — [issues]"
 
-On FAIL, you must announce a feedback loop and route work as follows:
-
-Sequential mode (no MODULES block):
-- error_checker -> developer -> re-run error_checker
-- security -> developer -> re-run security
-- tester -> developer -> re-run tester
-- reviewer -> developer (do not re-run reviewer unless explicitly needed)
-- deployer startup failure -> error_checker, then developer if code changes are required, then re-verify deployer
-- visual_tester -> developer -> re-run visual_tester
-
-Parallel mode (MODULES block active):
-- error_checker -> identify affected module from error file paths -> route to specific developer [MODULE:id] OR integrator if cross-module -> re-run error_checker
-- security -> same routing as error_checker
-- tester -> same routing as error_checker
-- reviewer -> specific developer [MODULE:id] or integrator (do not re-run reviewer unless explicitly needed)
-- deployer startup failure -> error_checker, then specific developer or integrator if code changes are required, then re-verify deployer
-- visual_tester -> developer (foundation or specific module depending on issue scope) -> re-run visual_tester
-
-Use this announcement format exactly:
-"FEEDBACK LOOP [N]: Routing from [quality_gate] back to [target_agent] because: [reason]"
-Then later:
-"FEEDBACK LOOP [N] COMPLETE: [resolved/partially resolved/unresolved]"
-
-Developer instructions inside loops:
-- Standard loop: ${developerFix}
-- Visual loop: ${visualFix}`;
+On FAIL, route fixes back through the pipeline:
+- Any gate failure -> developer (or specific module developer in parallel mode) -> re-run the gate
+- In parallel mode, identify the affected module from error file paths before routing
+- deployer startup failure -> error_checker first, then developer if code changes needed
+- Announce: "FEEDBACK LOOP [N]: Routing from [gate] back to [agent] because: [reason]"
+- ${mode === "existing" ? "Fix with minimal safe diffs; preserve conventions." : "Fix with targeted changes only."}`;
 }
 
 function buildHardRulesSection(totalAgents: number, stackGuardrails: string, mode: "new" | "existing"): string {
   return `## HARD RULES
-1. You are a coordinator only. Never write code yourself; delegate via Task.
-2. All ${totalAgents} agents in the forward pass must run at least once.
-3. Feedback loops are additional passes; they never replace the forward pass.
-4. Pass full execution context in every Task prompt: requested change, constraints, affected files, preferred commands, and read-only paths when present.
-5. Use TodoWrite to track progress and retries.
-6. Work autonomously; do not ask questions.
-7. Retry budget: error_checker/tester/reviewer/visual_tester = 3, security/deployer = 2.
-8. Artifact gates are mandatory: PRD.md after product_manager, ARCHITECTURE.md after architect, VISUAL_TEST_REPORT.md after visual_tester.
-9. visual_tester is a blocking gate. Do not complete the project unless it used real browser MCP tools and verified the changed flows.${mode === "existing" ? "\n10. Existing repo mode is DELTA-ONLY: audit before editing, preserve conventions, and do not rewrite unrelated systems." : ""}${stackGuardrails}`;
+1. Coordinator only — never write code; delegate via Task with full context (change, constraints, files, commands).
+2. All ${totalAgents} agents must run. Feedback loops are extra passes, not replacements.
+3. Retry budget: quality gates get 3 retries, security/deployer get 2.
+4. Artifact gates: PRD.md after product_manager, ARCHITECTURE.md after architect, VISUAL_TEST_REPORT.md after visual_tester.
+5. visual_tester is blocking — must use real Playwright browser tools. Pass the deployer URL and route list in the Task prompt.
+6. Work autonomously; do not ask questions.${mode === "existing" ? "\n7. Existing repo: delta-only changes, preserve conventions, audit before editing." : ""}${stackGuardrails}`;
 }
 
 function buildHostPlatformSection(): string {
@@ -3063,38 +2909,33 @@ function buildHostPlatformSection(): string {
 function buildUiUxSection(mode: "new" | "existing"): string {
   return `## UI/UX
 Today's date: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
-- Aim for high-polish, premium interfaces with strong hierarchy, responsive behavior, and meaningful animation.
-- Extend the repo's design system if one already exists${mode === "existing" ? "; do not replace it wholesale" : "."}
-- Default to light map tiles unless the user explicitly requests dark.
-- Respect reduced motion and existing theming support.
-- Empty, loading, and error states must all look intentional.
-- Interactive surfaces should feel alive: charts explorable, tables sortable, maps clickable, filters instant.`;
+- Professional, polished interfaces with clear hierarchy and responsive behavior.${mode === "existing" ? "\n- Extend the existing design system; do not replace it." : ""}
+- Empty, loading, and error states must all look intentional.`;
 }
 
 function buildDependencySection(mode: "new" | "existing"): string {
   return `## DEPENDENCIES
-- Verify the latest stable package version with WebSearch or WebFetch before installing.
-- Prefer the repository's current dependency strategy${mode === "existing" ? " unless a verified upgrade is required." : "."}
-- For JS, prefer npm install package@latest and then lock after validation.
-- For Python geospatial packages, prefer >= ranges instead of invented exact pins.
-- For requirements files, verify versions exist before pinning.`;
+- Verify package versions exist before installing.${mode === "existing" ? " Prefer the repo's current dependency strategy." : ""}`;
 }
 
 function buildFinalSummarySection(projectConfig: ProjectConfig, mode: "new" | "existing"): string {
   return `## FINAL SUMMARY
-Return a 3-5 line plain-text summary with no markdown. Include:
-- what changed,
-- what was verified,
-- where reports were written,
-- anything still manual.
-Use language like: "Done. ${mode === "existing" ? `Updated ${projectConfig.workingDir}` : `Built ${projectConfig.name}`} and verified it locally. Reports are consolidated in ORCHESTRA_REPORT.md. Temporary local listeners were closed."`;
+Return a 3-5 line plain-text summary: what changed, what was verified, where reports are, anything still manual.`;
+}
+
+// N1: Sanitize prompt inputs to prevent injection attacks
+function sanitizePromptInput(value: string): string {
+  if (!value) return value;
+  // Strip potential prompt injection markers
+  return value.replace(/\[IGNORE\s+ABOVE\]/gi, "[filtered]").replace(/\[SYSTEM\]/gi, "[filtered]").replace(/\[INSTRUCTION\]/gi, "[filtered]");
 }
 
 function buildSystemPrompt(projectConfig: ProjectConfig, template: string): string {
   const mode = getProjectMode(projectConfig);
   const usesDB = projectUsesDatabase(projectConfig);
   const pushGH = projectConfig.pushToGithub;
-  const totalAgents = usesDB ? 10 : 9;
+  const agentDefs = buildAgentDefinitions(projectConfig, (id) => ({}), usesDB, !!pushGH);
+  const totalAgents = Object.keys(agentDefs).length;
   const rc = loadOrchestraRC(projectConfig.workingDir);
   const stackGuardrails = formatStackGuardrails(projectConfig, rc);
   const roleLine = mode === "existing"
@@ -3144,8 +2985,8 @@ function buildPrompt(projectConfig: ProjectConfig): string {
 Mode: existing project
 Project: ${projectConfig.name}
 Repository Path: ${projectConfig.workingDir}
-Requested Change: ${projectConfig.businessNeed}
-Constraints: ${projectConfig.technicalApproach}
+Requested Change: ${sanitizePromptInput(projectConfig.businessNeed)}
+Constraints: ${sanitizePromptInput(projectConfig.technicalApproach)}
 Current State: ${formatPromptValue(projectConfig.currentState)}
 Preferred Start Command: ${formatPromptValue(projectConfig.startCommand)}
 Preferred Test Command: ${formatPromptValue(projectConfig.testCommand)}
@@ -3156,19 +2997,19 @@ Stack: ${projectConfig.techStack || "Detect from repository"}
 ${hostPlatformSection}
 
 START NOW — execute the full existing-project pipeline:
-0. Task(subagent_type="product_manager", description="Audit repo and write delta change plan", prompt="Inspect the repository before planning. Read manifests, entrypoints, nearby modules, tests, routes, infra, and any files relevant to this request. Write PRD.md as a DELTA change plan for: ${projectConfig.businessNeed}. Include current-state summary, affected modules, acceptance criteria, explicit in-scope/out-of-scope boundaries, regression risks, and rollout notes. Do not propose a rewrite.")
-1. Task(subagent_type="architect", description="Design the minimal architecture delta", prompt="Read PRD.md and inspect the existing repo. Produce ARCHITECTURE.md focused on the architecture delta for: ${projectConfig.businessNeed}. Preserve existing patterns, list only touched/new files, note contracts to preserve, commands to run, and deployment or migration implications.")
+0. Task(subagent_type="product_manager", description="Audit repo and write delta change plan", prompt="Inspect the repository before planning. Read manifests, entrypoints, nearby modules, tests, routes, infra, and any files relevant to this request. Write PRD.md as a DELTA change plan for: ${sanitizePromptInput(projectConfig.businessNeed)}. Include current-state summary, affected modules, acceptance criteria, explicit in-scope/out-of-scope boundaries, regression risks, and rollout notes. Do not propose a rewrite.")
+1. Task(subagent_type="architect", description="Design the minimal architecture delta", prompt="Read PRD.md and inspect the existing repo. Produce ARCHITECTURE.md focused on the architecture delta for: ${sanitizePromptInput(projectConfig.businessNeed)}. Preserve existing patterns, list only touched/new files, note contracts to preserve, commands to run, and deployment or migration implications.")
 2. READ ARCHITECTURE.md completely. Look for the <!-- MODULES --> JSON block at the end.
 
    IF ARCHITECTURE.md contains a <!-- MODULES --> block with 2+ modules:
-     2a. Task(subagent_type="developer_foundation", description="Create shared types, configs, layouts [FOUNDATION]", prompt="Read ARCHITECTURE.md. Create or update ALL files listed in sharedFiles. Install all dependencies. Preserve repo conventions. Do NOT implement module features. Requested change: ${projectConfig.businessNeed}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.")
+     2a. Task(subagent_type="developer_foundation", description="Create shared types, configs, layouts [FOUNDATION]", prompt="Read ARCHITECTURE.md. Create or update ALL files listed in sharedFiles. Install all dependencies. Preserve repo conventions. Do NOT implement module features. Requested change: ${sanitizePromptInput(projectConfig.businessNeed)}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.")
      2b. CRITICAL — You MUST launch ALL module Tasks in a SINGLE response. Do NOT wait for one module to finish before launching the next. Emit every Task call together in one message so they run concurrently:
-         For each module in the modules array: Task(subagent_type="developer", description="Implement [module.name] [MODULE:module.id]", prompt="Read ARCHITECTURE.md and PRD.md. Implement ONLY the [module.name] module with minimal correct diffs. Your scope is ONLY these files: [module.files list]. Import shared types/configs from the foundation — do NOT modify shared files. Preserve repo conventions. Requested change: ${projectConfig.businessNeed}. Constraints: ${projectConfig.technicalApproach}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.")
+         For each module in the modules array: Task(subagent_type="developer", description="Implement [module.name] [MODULE:module.id]", prompt="Read ARCHITECTURE.md and PRD.md. Implement ONLY the [module.name] module with minimal correct diffs. Your scope is ONLY these files: [module.files list]. Import shared types/configs from the foundation — do NOT modify shared files. Preserve repo conventions. Requested change: ${sanitizePromptInput(projectConfig.businessNeed)}. Constraints: ${sanitizePromptInput(projectConfig.technicalApproach)}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.")
      2c. WAIT for ALL module Tasks to complete, THEN launch integrator:
          Task(subagent_type="integrator", description="Wire all modules together and verify build [INTEGRATOR]", prompt="All module developers finished. Read all source files. Fix cross-module conflicts, wire navigation/routes, ensure tsc --noEmit and npm run build pass. Make minimal targeted fixes only. Preserve repo conventions.")
 
    ELSE (no modules block — single developer fallback):
-     2. Task(subagent_type="developer", description="Implement the requested change with surgical edits", prompt="Read PRD.md and ARCHITECTURE.md, inspect the current source tree, and implement the requested change with minimal correct diffs. Preserve repo conventions. Requested change: ${projectConfig.businessNeed}. Constraints: ${projectConfig.technicalApproach}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.") [repeat per affected module]
+     2. Task(subagent_type="developer", description="Implement the requested change with surgical edits", prompt="Read PRD.md and ARCHITECTURE.md, inspect the current source tree, and implement the requested change with minimal correct diffs. Preserve repo conventions. Requested change: ${sanitizePromptInput(projectConfig.businessNeed)}. Constraints: ${sanitizePromptInput(projectConfig.technicalApproach)}. Read-only paths: ${formatPromptValue(projectConfig.readonlyPaths)}.") [repeat per affected module]
 ${usesDB ? `
 3. Task(subagent_type="database", description="Review database impact for the existing repo", prompt="Read PRD.md and ARCHITECTURE.md, inspect the current data layer, and only introduce schema or migration changes if they are truly required. If no DB change is needed, write DATABASE.md stating that clearly and explain why.")` : ""}
 ${usesDB ? "4" : "3"}. CRITICAL — You MUST launch BOTH error_checker AND security in a SINGLE response. Do NOT launch one and wait for it to finish before the other. Emit both Task calls together so they run concurrently:
@@ -3176,7 +3017,8 @@ ${usesDB ? "4" : "3"}. CRITICAL — You MUST launch BOTH error_checker AND secur
 ${usesDB ? "5" : "4"}. Task(subagent_type="tester", description="Write and run regression tests for the changed behavior", prompt="Use the repository's preferred test command when available: ${formatPromptValue(projectConfig.testCommand)}. Focus on regression coverage for the requested change, touched modules, and critical adjacent flows. Add tests to the existing framework instead of inventing a parallel test setup.")
 ${usesDB ? "6" : "5"}. Task(subagent_type="reviewer", description="Review changed files and impacted integration points", prompt="Review the implementation for regressions, contract mismatches, performance issues, maintainability problems, and missing tests. Focus on what changed and what it can break in the existing system.")
 ${usesDB ? "7" : "6"}. Task(subagent_type="deployer", description="Use existing scripts and verify the updated app", prompt="Use the repo's actual scripts, README patterns, and CI setup as the baseline. Preferred start command: ${formatPromptValue(projectConfig.startCommand)}. Consolidate report markdown files into ORCHESTRA_REPORT.md, verify the app runs, and report the exact URL used for verification. The orchestrator will clean up temporary local listeners after the full pipeline finishes.")
-${usesDB ? "8" : "7"}. Task(subagent_type="visual_tester", description="Open the updated app in Chrome and test changed flows", prompt="Open the running app in Chrome. Test the changed routes and critical smoke flows from ARCHITECTURE.md. Check console errors, network failures, broken interactions, and visual regressions.")
+${usesDB ? "8" : "7"}. READ the deployer output to find the exact running URL and READ ARCHITECTURE.md to get the route list. Then:
+   Task(subagent_type="visual_tester", description="Visual QA: browser-test the running app at [URL]", prompt="The app is running at [PASTE THE EXACT URL FROM DEPLOYER OUTPUT, e.g. http://localhost:3000]. Routes to test: [PASTE THE ROUTE LIST FROM ARCHITECTURE.md]. Use the Playwright MCP browser tools (mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp__playwright__browser_take_screenshot, mcp__playwright__browser_click, mcp__playwright__browser_type, mcp__playwright__browser_console_messages) to test every route. Navigate to each route, take snapshots and screenshots at 3 viewports (375px, 768px, 1280px), click all interactive elements, check console for errors, and write VISUAL_TEST_REPORT.md.")
 
 After each quality gate (Error Checker, Tester, Reviewer, Deployer, Visual Tester), READ their output.
 If they found unresolved issues → identify the affected module from file paths → route back to the specific module Developer (or Integrator if cross-module) to fix → re-verify.
@@ -3191,15 +3033,15 @@ Do NOT write any code yourself. For every delegation, pass along the requested c
   return `Build this project end-to-end by delegating to your specialized subagents.
 
 Project: ${projectConfig.name}
-Business Need: ${projectConfig.businessNeed}
-Technical Approach: ${projectConfig.technicalApproach}
+Business Need: ${sanitizePromptInput(projectConfig.businessNeed)}
+Technical Approach: ${sanitizePromptInput(projectConfig.technicalApproach)}
 Stack: ${projectConfig.techStack || "Architect decides"}
 
 ${hostPlatformSection}
 
 START NOW — execute the full pipeline:
-0. Task(subagent_type="product_manager", description="Write PRD with user stories and requirements", prompt="Write PRD.md for: ${projectConfig.businessNeed}. Include user personas, 8+ user stories, functional requirements, non-functional requirements, and edge cases.")
-1. Task(subagent_type="architect", description="Design complete architecture", prompt="Read PRD.md then design the full system for: ${projectConfig.businessNeed}. Tech stack hint: ${projectConfig.techStack || 'pick the best'}. Produce ARCHITECTURE.md with file structure, data models, API contracts.")
+0. Task(subagent_type="product_manager", description="Write PRD with user stories and requirements", prompt="Write PRD.md for: ${sanitizePromptInput(projectConfig.businessNeed)}. Include user personas, 8+ user stories, functional requirements, non-functional requirements, and edge cases.")
+1. Task(subagent_type="architect", description="Design complete architecture", prompt="Read PRD.md then design the full system for: ${sanitizePromptInput(projectConfig.businessNeed)}. Tech stack hint: ${projectConfig.techStack || 'pick the best'}. Produce ARCHITECTURE.md with file structure, data models, API contracts.")
 2. READ ARCHITECTURE.md completely. Look for the <!-- MODULES --> JSON block at the end.
 
    IF ARCHITECTURE.md contains a <!-- MODULES --> block with 2+ modules:
@@ -3218,7 +3060,8 @@ ${usesDB ? "4" : "3"}. CRITICAL — You MUST launch BOTH error_checker AND secur
 ${usesDB ? "5" : "4"}. Task(subagent_type="tester", ...)
 ${usesDB ? "6" : "5"}. Task(subagent_type="reviewer", ...)
 ${usesDB ? "7" : "6"}. Task(subagent_type="deployer", ...)
-${usesDB ? "8" : "7"}. Task(subagent_type="visual_tester", prompt="Open the running app in Chrome. Test all pages, check console for errors, click interactive elements, verify data renders.")
+${usesDB ? "8" : "7"}. READ the deployer output to find the exact running URL and READ ARCHITECTURE.md to get the route list. Then:
+   Task(subagent_type="visual_tester", description="Visual QA: browser-test the running app at [URL]", prompt="The app is running at [PASTE THE EXACT URL FROM DEPLOYER OUTPUT, e.g. http://localhost:3000]. Routes to test: [PASTE THE ROUTE LIST FROM ARCHITECTURE.md]. Use the Playwright MCP browser tools (mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp__playwright__browser_take_screenshot, mcp__playwright__browser_click, mcp__playwright__browser_type, mcp__playwright__browser_console_messages) to test every route. Navigate to each route, take snapshots and screenshots at 3 viewports (375px, 768px, 1280px), click all interactive elements, check console for errors, and write VISUAL_TEST_REPORT.md.")
 
 After each quality gate (Error Checker, Tester, Reviewer, Deployer, Visual Tester), READ their output.
 If they found unresolved issues → identify the affected module from file paths → route back to the specific module Developer (or Integrator if cross-module) to fix → re-verify.

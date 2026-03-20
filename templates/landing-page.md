@@ -3,9 +3,12 @@
 You are building a landing page or static website. Follow these guidelines:
 
 ## Architecture
-- Static HTML/CSS/JS or a lightweight framework (Astro, Hugo, 11ty)
-- Focus on performance, SEO, and visual appeal
-- Mobile-first responsive design
+Choose the approach that fits your project:
+- **Static**: HTML/CSS/JS, Astro, Hugo, or 11ty — best for content-focused pages targeting Lighthouse 95+
+- **Interactive**: React 19+ with Tailwind CSS — best for pages with complex state, animations, or dynamic content
+
+Focus on performance, SEO, and visual appeal regardless of approach.
+Mobile-first responsive design.
 
 ## Steps
 1. **Design Planning**: Define the page sections, content hierarchy, and visual style
@@ -23,43 +26,24 @@ You are building a landing page or static website. Follow these guidelines:
 - Fast load times
 - Accessible (WCAG 2.1 AA)
 
-## UI/UX Design Standards (MANDATORY)
-
-CRITICAL: All user interfaces MUST follow these modern design principles. Every UI you create must look like it was designed by a professional product designer at a top tech company (Vercel, Linear, Raycast, Stripe level quality).
-
-### Visual Design
-- **NO plain black or white backgrounds** — Use rich gradient backgrounds (subtle dark gradients for dark themes, warm light gradients for light themes)
-- Apply glass morphism effects (backdrop-blur, translucent cards with subtle borders)
-- Use depth through layered shadows (multiple box-shadows at different opacities)
-- Modern rounded corners (rounded-2xl for cards, rounded-xl for inputs)
-- Include micro-animations for all interactions (hover states, focus rings, loading transitions)
-
-### Color & Typography
-- Use a cohesive color palette with a clear primary accent color
-- Typography: Import modern web fonts (Inter, Plus Jakarta Sans, Geist, or similar)
-- Create visual hierarchy through size, weight, opacity, and spacing variations
-- Use gradient text effects for headings and accent elements
-
-### Interactions & Animations
-- Smooth transitions on all interactive elements (200-300ms ease)
-- Hover states with subtle elevation, glow, or scale effects
-- Loading skeletons (shimmer effect) instead of basic spinners
-- Toast notifications for user feedback
-- Responsive design that works beautifully on mobile, tablet, and desktop
-
-### Technology Stack (Always Latest)
+## Technology Stack (for Interactive Landing Pages)
+If your landing page requires complex interactivity, use:
 - React 19+ with modern patterns (hooks, suspense, streaming)
 - Tailwind CSS v4 for styling
 - shadcn/ui or Radix UI for accessible component primitives
-- recharts or chart.js for interactive data visualizations
 - framer-motion for complex animations, CSS transitions for simple ones
-- zod + react-hook-form for form validation
-- TanStack Query for server state
 - lucide-react or heroicons for icons
 
-### Quality Bar
-- Every component must have hover, focus, and active states
-- All forms must have proper validation with inline error messages
-- Empty states should be designed (not just "No data")
-- Error states should be helpful and well-designed
-- Dark mode support with proper color tokens
+For static landing pages, prefer vanilla HTML/CSS/JS or a lightweight static site generator.
+
+## Tools Available
+- Shell: `mcp__desktop-commander__*` tools for running commands
+- Browser: `mcp__playwright__*` tools for visual testing
+
+## SUCCESS CRITERIA
+- Lighthouse score 90+ on Performance, Accessibility, Best Practices, SEO
+- All interactive elements work correctly (forms, modals, animations)
+- Page loads in under 3 seconds on 4G
+- Responsive layout works at 375px, 768px, and 1280px viewports
+- No console errors or warnings in the browser
+- All links and CTAs function correctly

@@ -6,6 +6,9 @@ import type { OrchestraEvent } from "@shared/types";
  * Listens for live WebSocket events and invalidates stale query caches.
  * Usage updates come from `usage_update`; project state is refreshed from
  * pipeline events so History and Dashboard stay current without manual reloads.
+ *
+ * NOTE: WebSocket connection logic is shared with useWebSocket.ts
+ * TODO: Extract common WS setup into a shared utility hook (I28)
  */
 export interface LiveUsageData {
   todayTokens: number;

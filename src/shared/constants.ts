@@ -6,9 +6,10 @@ export const PROJECTS_DIR_NAME = "projects";
 export const DEFAULT_MAX_TURNS = 100;
 export const DEFAULT_MAX_BUDGET_USD = 10.0;
 
-// Pricing per million tokens (USD). Keys are model ID prefixes so that both
-// snapshot dates ("claude-sonnet-4-5-20250929") and short aliases ("claude-sonnet-4-5")
-// match automatically via prefix lookup in cost-tracker.ts.
+// Pricing per million tokens (USD).
+// Example: { input: 5, output: 25 } means $5.00 per 1M input tokens, $25.00 per 1M output tokens.
+// Last verified: 2026-03-20 — https://docs.anthropic.com/en/docs/about-claude/models
+// Keys are model ID prefixes so that both snapshot dates and short aliases match via prefix lookup.
 export const PRICING: Record<string, { input: number; output: number }> = {
   // Claude 4.6 series
   "claude-opus-4-6":    { input: 5,   output: 25 },

@@ -68,7 +68,7 @@ function saveLessons(lessons: Lesson[]): void {
 
 // ── Add lesson ───────────────────────────────────────────────────────────────
 
-export function addLesson(input: Omit<Lesson, "id" | "hitCount" | "createdAt" | "lastHitAt">): Lesson {
+export function addLesson(input: Omit<Lesson, "id" | "hitCount" | "createdAt" | "lastHitAt">, initialHitCount?: number): Lesson {
   const lessons = loadLessons();
 
   // Deduplicate: if a very similar lesson exists (same agent + category + close summary), bump it
@@ -86,15 +86,15 @@ export function addLesson(input: Omit<Lesson, "id" | "hitCount" | "createdAt" | 
   const lesson: Lesson = {
     id: crypto.randomUUID(),
     ...input,
-    hitCount: 1,
+    hitCount: initialHitCount ?? 1,
     createdAt: new Date().toISOString(),
     lastHitAt: new Date().toISOString(),
   };
   lessons.push(lesson);
 
-  // Prune if over limit: remove lowest hitCount, oldest first
+  // Prune if over limit: remove lowest hitCount, oldest first (deterministic sort)
   if (lessons.length > MAX_LESSONS) {
-    lessons.sort((a, b) => b.hitCount - a.hitCount || new Date(b.lastHitAt).getTime() - new Date(a.lastHitAt).getTime());
+    lessons.sort((a, b) => b.hitCount - a.hitCount || new Date(b.lastHitAt).getTime() - new Date(a.lastHitAt).getTime() || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     lessons.length = MAX_LESSONS;
   }
 
@@ -297,14 +297,7 @@ export function extractLessonsFromFeedback(params: {
       summary,
       fix: fixSummary,
       stacks,
-    });
-    // Bump hitCount to 2 for user-reported lessons (higher weight)
-    if (lesson.hitCount === 1) {
-      lesson.hitCount = 2;
-      const lessons = loadLessons();
-      const idx = lessons.findIndex((l) => l.id === lesson.id);
-      if (idx !== -1) { lessons[idx] = lesson; saveLessons(lessons); }
-    }
+    }, 2); // User-reported lessons get higher weight
     added.push(lesson);
   }
 
@@ -455,7 +448,7 @@ function inferCategoryFromFailure(failure: string): Lesson["category"] {
 }
 
 function suggestFixFromFailure(failure: string): string {
-  if (/browser_navigate|browser_snapshot|browser_click|browser_console_messages|browser_take_screenshot/i.test(failure)) {
+  if (/mcp__playwright__browser_navigate|mcp__playwright__browser_snapshot|mcp__playwright__browser_click|mcp__playwright__browser_console_messages|mcp__playwright__browser_take_screenshot|browser_navigate|browser_snapshot|browser_click|browser_console_messages|browser_take_screenshot/i.test(failure)) {
     return "Use the required Playwright browser tools, click through changed flows, inspect console output, and capture screenshots before passing visual QA.";
   }
   if (/interaction|button|link|modal|form/i.test(failure)) {
@@ -491,12 +484,14 @@ function extractStacks(techStack: string): string[] {
 }
 
 function similarText(a: string, b: string): boolean {
-  const na = a.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const nb = b.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const na = a.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+  const nb = b.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
   if (na === nb) return true;
-  // Check if one contains the other (>70% overlap)
-  if (na.length > 10 && nb.length > 10) {
-    return na.includes(nb.slice(0, Math.floor(nb.length * 0.7))) || nb.includes(na.slice(0, Math.floor(na.length * 0.7)));
-  }
-  return false;
+  // Require exact match on first 10 chars AND >80% token overlap
+  if (na.length < 10 || nb.length < 10) return false;
+  const tokensA = new Set(na.split(/\s+/));
+  const tokensB = new Set(nb.split(/\s+/));
+  const intersection = [...tokensA].filter(t => tokensB.has(t)).length;
+  const union = new Set([...tokensA, ...tokensB]).size;
+  return union > 0 && (intersection / union) > 0.8;
 }

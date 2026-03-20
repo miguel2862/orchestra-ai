@@ -86,7 +86,7 @@ The dashboard is the product, not a loading screen:
 
 Most AI coding tools run one agent that writes everything sequentially. If the project is large, the context window fills up and quality drops.
 
-**Orchestra v0.4.0 introduces parallel module development:**
+**Orchestra v4.1.0 introduces parallel module development:**
 
 ```
           Architect defines N modules
@@ -567,6 +567,6 @@ Built with [AnimeJS](https://animejs.com) animations · Powered by the [Claude A
 
 <br/>
 
-<sub>Orchestra AI v0.4.0</sub>
+<sub>Orchestra AI v4.1.0</sub>
 
 </div>

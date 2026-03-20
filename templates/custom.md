@@ -15,9 +15,9 @@ You are building a custom project based entirely on the user's specifications.
 - Include proper error handling
 - Document any non-obvious decisions
 
-## UI/UX Design Standards (MANDATORY)
+## UI/UX Design Standards (IF YOUR PROJECT INCLUDES A WEB UI)
 
-CRITICAL: All user interfaces MUST follow these modern design principles. Every UI you create must look like it was designed by a professional product designer at a top tech company (Vercel, Linear, Raycast, Stripe level quality).
+The following standards apply only if your custom project includes a web-based user interface. For CLI tools, APIs, data pipelines, or other non-UI projects, skip this section.
 
 ### Visual Design
 - **NO plain black or white backgrounds** — Use rich gradient backgrounds (subtle dark gradients for dark themes, warm light gradients for light themes)
@@ -55,3 +55,14 @@ CRITICAL: All user interfaces MUST follow these modern design principles. Every 
 - Empty states should be designed (not just "No data")
 - Error states should be helpful and well-designed
 - Dark mode support with proper color tokens
+
+## Tools Available
+- Shell: `mcp__desktop-commander__*` tools for running commands
+- Browser: `mcp__playwright__*` tools for visual testing
+
+## SUCCESS CRITERIA
+- All deliverables match the project specification
+- Code is clean, well-commented, and follows best practices
+- All tests pass
+- Project starts and runs without errors
+- Documentation is clear and comprehensive

@@ -6,8 +6,14 @@ const MAX_EVENTS = 5000;
 export function useWebSocket(projectId: string | undefined) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const projectIdRef = useRef(projectId);
   const [events, setEvents] = useState<OrchestraEvent[]>([]);
   const [connected, setConnected] = useState(false);
+
+  // Keep ref in sync
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
 
   // Load stored events on mount for page-refresh recovery
   useEffect(() => {
@@ -18,9 +24,8 @@ export function useWebSocket(projectId: string | undefined) {
       .then((stored: OrchestraEvent[]) => {
         if (stored.length > 0) {
           setEvents((prev) => {
-            // Merge stored + any live WS events that arrived before fetch resolved
-            const storedKeys = new Set(stored.map((e) => `${e.type}:${e.timestamp}`));
-            const deduped = prev.filter((e) => !storedKeys.has(`${e.type}:${e.timestamp}`));
+            const storedKeys = new Set(stored.map((e) => `${e.type}:${e.timestamp}:${JSON.stringify(e.data ?? {})}`));
+            const deduped = prev.filter((e) => !storedKeys.has(`${e.type}:${e.timestamp}:${JSON.stringify((e as any).data ?? {})}`));
             return [...stored, ...deduped].slice(-MAX_EVENTS);
           });
         }
@@ -37,12 +42,14 @@ export function useWebSocket(projectId: string | undefined) {
     ws.onopen = () => setConnected(true);
     ws.onclose = () => {
       setConnected(false);
+      // Only reconnect if not being cleaned up
       reconnectTimer.current = setTimeout(connect, 2000);
     };
     ws.onmessage = (e) => {
       try {
         const event: OrchestraEvent = JSON.parse(e.data);
-        if (!projectId || event.projectId === projectId) {
+        const currentPid = projectIdRef.current;
+        if (!currentPid || event.projectId === currentPid) {
           setEvents((prev) => {
             const next = [...prev, event];
             return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
@@ -52,25 +59,29 @@ export function useWebSocket(projectId: string | undefined) {
         // ignore malformed messages
       }
     };
-  }, [projectId]);
+  }, []); // No dependencies — uses refs for projectId
 
   useEffect(() => {
     connect();
     return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
       wsRef.current?.close();
+      wsRef.current = null;
     };
   }, [connect]);
 
   const sendIntervention = useCallback(
     (text: string) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN && projectId) {
+      if (wsRef.current?.readyState === WebSocket.OPEN && projectIdRef.current) {
         wsRef.current.send(
-          JSON.stringify({ type: "intervention", projectId, text }),
+          JSON.stringify({ type: "intervention", projectId: projectIdRef.current, text }),
         );
       }
     },
-    [projectId],
+    [],
   );
 
   const clearEvents = useCallback(() => setEvents([]), []);

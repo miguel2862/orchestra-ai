@@ -113,6 +113,8 @@ export function getClaudeUsageStats(): ClaudeUsageStats {
 
 let watcher: FSWatcher | null = null;
 let onChangeCallback: ((stats: ClaudeUsageStats) => void) | null = null;
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let isInitializing = false;
 
 /**
  * Watch ~/.claude/stats-cache.json for changes and invoke callback with fresh data.
@@ -122,6 +124,9 @@ let onChangeCallback: ((stats: ClaudeUsageStats) => void) | null = null;
 export function watchUsageStats(
   onChange: (stats: ClaudeUsageStats) => void,
 ): void {
+  if (isInitializing) return;
+  isInitializing = true;
+
   onChangeCallback = onChange;
 
   const statsPath = join(homedir(), ".claude", "stats-cache.json");
@@ -133,9 +138,10 @@ export function watchUsageStats(
 
   // Watch the directory since the file may be replaced atomically
   const dir = join(homedir(), ".claude");
-  if (!existsSync(dir)) return;
-
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  if (!existsSync(dir)) {
+    isInitializing = false;
+    return;
+  }
 
   try {
     watcher = watch(dir, (eventType, filename) => {
@@ -155,9 +161,15 @@ export function watchUsageStats(
   } catch {
     // fs.watch may not be available on all platforms; fall back silently
   }
+
+  isInitializing = false;
 }
 
 export function stopWatchingUsageStats(): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
   if (watcher) {
     watcher.close();
     watcher = null;

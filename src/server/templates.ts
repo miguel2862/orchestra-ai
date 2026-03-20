@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,11 +32,23 @@ export function getTemplate(name: string): string {
 }
 
 export function listTemplates(): Array<{ id: string; name: string; description: string }> {
-  return [
-    { id: "fullstack", name: "Full-Stack Web App", description: "React + Node.js + DB" },
-    { id: "api-backend", name: "API Backend", description: "REST API with Express/FastAPI" },
-    { id: "landing-page", name: "Landing Page", description: "Static site with modern design" },
-    { id: "cli-tool", name: "CLI Tool", description: "Command-line application" },
-    { id: "custom", name: "Custom", description: "You define everything" },
-  ];
+  const dir = getTemplatesDir();
+  const descriptions: Record<string, { name: string; description: string }> = {
+    "fullstack": { name: "Full-Stack Web App", description: "React + Node.js + DB" },
+    "api-backend": { name: "API Backend", description: "REST API with Express/FastAPI" },
+    "landing-page": { name: "Landing Page", description: "Static site with modern design" },
+    "cli-tool": { name: "CLI Tool", description: "Command-line application" },
+    "custom": { name: "Custom", description: "You define everything" },
+  };
+
+  try {
+    const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
+    return files.map((f) => {
+      const id = f.replace(/\.md$/, "");
+      const meta = descriptions[id] || { name: id, description: id };
+      return { id, ...meta };
+    });
+  } catch {
+    return Object.entries(descriptions).map(([id, meta]) => ({ id, ...meta }));
+  }
 }

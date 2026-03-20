@@ -17,7 +17,7 @@ function hexToRgba(color: string, alpha: number): string {
 }
 
 type AgentStatus = "idle" | "active" | "completed" | "failed";
-type ProjectStatus = "running" | "completed" | "failed" | "stopped";
+type ProjectStatus = "running" | "completed" | "failed" | "stopped" | "paused" | "manual_review" | "waiting_for_feedback";
 
 interface AgentState {
   status: AgentStatus;

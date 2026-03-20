@@ -11,11 +11,17 @@ export function setupWebSocket(server: Server): WebSocketServer {
     const messageHandler = (raw: Buffer) => {
       try {
         const msg = JSON.parse(String(raw));
+        if (!msg || typeof msg !== "object" || !msg.type) {
+          console.debug("[ws] Received message with no type, ignoring");
+          return;
+        }
         if (msg.type === "intervention" && interventionHandler) {
           interventionHandler(msg as InterventionMessage);
+        } else {
+          console.debug(`[ws] Unknown message type: ${msg.type}`);
         }
       } catch {
-        // ignore malformed
+        console.debug("[ws] Failed to parse incoming WebSocket message");
       }
     };
     ws.on("message", messageHandler);
@@ -33,7 +39,12 @@ export function broadcast(event: OrchestraEvent): void {
   const data = JSON.stringify(event);
   for (const client of wss.clients) {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(data);
+      try {
+        client.send(data);
+      } catch (err) {
+        console.debug("[ws] Failed to send to client, closing:", String(err).slice(0, 80));
+        try { client.close(); } catch { /* ignore */ }
+      }
     }
   }
 }

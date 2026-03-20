@@ -9,8 +9,8 @@ export type ModelId =
   | "claude-sonnet-4-6"
   | "claude-haiku-4-5"
   // Dated snapshots — use only when you need reproducibility
-  | "claude-opus-4-5-20251101"
-  | "claude-sonnet-4-5-20250929"
+  | "claude-opus-4-6-20260301"
+  | "claude-sonnet-4-6-20260301"
   | "claude-haiku-4-5-20251001";
 
 /** Short aliases accepted for sub-agent model config */
@@ -18,13 +18,13 @@ export type AgentModelAlias = "opus" | "sonnet" | "haiku" | "inherit";
 
 export const MODEL_OPTIONS: { id: ModelId; label: string; short: string }[] = [
   // Short aliases at the top — future-proof choices
-  { id: "claude-opus-4-6",            label: "Opus 4.6 (latest)",    short: "opus"   },
-  { id: "claude-sonnet-4-6",          label: "Sonnet 4.6 (latest)",  short: "sonnet" },
-  { id: "claude-haiku-4-5",           label: "Haiku 4.5 (latest)",   short: "haiku"  },
+  { id: "claude-opus-4-6",            label: "Opus 4.6 (latest)",     short: "opus"   },
+  { id: "claude-sonnet-4-6",          label: "Sonnet 4.6 (latest)",   short: "sonnet" },
+  { id: "claude-haiku-4-5",           label: "Haiku 4.5 (latest)",    short: "haiku"  },
   // Dated snapshots — pinned versions
-  { id: "claude-opus-4-5-20251101",   label: "Opus 4.5 (Nov 2025)",  short: "opus"   },
-  { id: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5 (Sep 2025)",short: "sonnet" },
-  { id: "claude-haiku-4-5-20251001",  label: "Haiku 4.5 (Oct 2025)", short: "haiku"  },
+  { id: "claude-opus-4-6-20260301",   label: "Opus 4.6 (Mar 2026)",   short: "opus"   },
+  { id: "claude-sonnet-4-6-20260301", label: "Sonnet 4.6 (Mar 2026)", short: "sonnet" },
+  { id: "claude-haiku-4-5-20251001",  label: "Haiku 4.5 (Oct 2025)",  short: "haiku"  },
 ];
 
 export const AGENT_MODEL_OPTIONS: { id: AgentModelAlias; label: string }[] = [
@@ -107,7 +107,7 @@ export interface ProjectConfig {
 export interface Project {
   id: string;
   config: ProjectConfig;
-  status: "running" | "completed" | "failed" | "stopped";
+  status: "running" | "completed" | "failed" | "stopped" | "paused" | "manual_review" | "waiting_for_feedback";
   sessionId?: string;
   createdAt: number;
   updatedAt: number;

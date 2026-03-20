@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { existsSync, readFileSync, writeFileSync, readdirSync, appendFileSync, rmSync, unlinkSync, statSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, readdirSync, appendFileSync, rmSync, unlinkSync, statSync, renameSync } from "node:fs";
 import { getProjectsDir, ensureConfigDir } from "./config.js";
 import type { Project } from "../shared/types.js";
 
@@ -20,11 +20,17 @@ function validateId(id: string): void {
   if (!SAFE_ID.test(id)) throw new Error(`Invalid project id: ${id}`);
 }
 
+function isOrchestraEvent(event: unknown): event is { type: string; projectId: string; timestamp: number; data?: Record<string, unknown> } {
+  return typeof event === "object" && event !== null && "type" in event && "projectId" in event && "timestamp" in event;
+}
+
 export async function createProject(project: Project): Promise<void> {
   validateId(project.id);
   ensureConfigDir();
-  const path = join(getProjectsDir(), `${project.id}.json`);
-  writeFileSync(path, JSON.stringify(project, null, 2));
+  const targetPath = join(getProjectsDir(), `${project.id}.json`);
+  const tmpPath = targetPath + `.tmp.${Date.now()}`;
+  writeFileSync(tmpPath, JSON.stringify(project, null, 2));
+  renameSync(tmpPath, targetPath);
 }
 
 export async function updateProject(
@@ -35,10 +41,10 @@ export async function updateProject(
   const project = await getProject(id);
   if (!project) return;
   const updated = { ...project, ...updates, updatedAt: Date.now() };
-  writeFileSync(
-    join(getProjectsDir(), `${id}.json`),
-    JSON.stringify(updated, null, 2),
-  );
+  const targetPath = join(getProjectsDir(), `${id}.json`);
+  const tmpPath = targetPath + `.tmp.${Date.now()}`;
+  writeFileSync(tmpPath, JSON.stringify(updated, null, 2));
+  renameSync(tmpPath, targetPath);
 }
 
 export async function getProject(id: string): Promise<Project | null> {
@@ -89,12 +95,17 @@ export function getProjectEvents(id: string): unknown[] {
   if (!existsSync(path)) return [];
   const lines = readFileSync(path, "utf-8").trim().split("\n").filter(Boolean);
   const events: unknown[] = [];
-  for (const line of lines) {
+  let corruptedCount = 0;
+  for (const [i, line] of lines.entries()) {
     try {
       events.push(JSON.parse(line));
     } catch {
-      // Skip corrupted line instead of losing all events
+      corruptedCount++;
+      console.warn(`[project-store] Corrupted JSONL line ${i + 1} in ${id}-events.jsonl, skipping`);
     }
+  }
+  if (corruptedCount > 0) {
+    console.warn(`[project-store] ${corruptedCount} corrupted line(s) in ${id}-events.jsonl`);
   }
   return events;
 }
@@ -103,7 +114,7 @@ export function getRecoveredProjectEvents(project: Project): unknown[] {
   const events = [...getProjectEvents(project.id)];
   const completedAgents = new Set(
     events
-      .filter((event) => typeof event === "object" && event !== null && "type" in event && (event as { type?: string }).type === "subagent_completed")
+      .filter((event) => isOrchestraEvent(event) && event.type === "subagent_completed")
       .map((event) => ((event as { data?: { agent?: string } }).data?.agent))
       .filter((agent): agent is string => typeof agent === "string" && agent.length > 0),
   );

@@ -84,9 +84,10 @@ function printGeminiHelp(): void {
 
 async function handleGeminiStatus(args: ParsedCliArgs): Promise<number> {
   const { getGeminiUsage, isGeminiAvailable } = await import("../server/gemini.js");
+  const geminiConfigured = isGeminiAvailable();
   const payload = {
-    available: isGeminiAvailable(),
-    configured: isGeminiAvailable(),
+    available: geminiConfigured && !getGeminiUsage().rateLimited,
+    configured: geminiConfigured,
     usage: getGeminiUsage(),
   };
 

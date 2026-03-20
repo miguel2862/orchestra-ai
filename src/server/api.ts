@@ -14,7 +14,7 @@ function maskSecret(value?: string): string {
 }
 
 function isMaskedSecret(value: unknown): value is string {
-  return typeof value === "string" && /^\*{4}.{0,}$/.test(value);
+  return typeof value === "string" && value.startsWith("****") && value.length > 4;
 }
 
 function getNpxCommand(): string {
@@ -51,6 +51,7 @@ export function setupApiRoutes(app: Express): void {
     for (const [key, value] of Object.entries(req.body)) {
       if (!ALLOWED_KEYS.has(key)) continue;
       if (SECRET_KEYS.has(key) && isMaskedSecret(value)) continue;
+      if (SECRET_KEYS.has(key) && (value === "" || value === null || value === undefined)) continue;
       patch[key] = value;
     }
     const updated = { ...config, ...patch };

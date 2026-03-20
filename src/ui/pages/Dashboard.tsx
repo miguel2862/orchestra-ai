@@ -37,11 +37,14 @@ export default function Dashboard() {
   const isRunning = project?.status === "running";
   const isDone = project?.status === "completed" || project?.status === "failed" || project?.status === "stopped";
 
-  const statusIcon = {
+  const statusIcon: Record<string, React.ReactNode> = {
     running: <Loader className="w-5 h-5 text-amber-400 animate-spin" />,
     completed: <CheckCircle className="w-5 h-5 text-green-400" />,
     failed: <XCircle className="w-5 h-5 text-red-400" />,
     stopped: <Square className="w-5 h-5 text-neutral-400" />,
+    paused: <Square className="w-5 h-5 text-yellow-400" />,
+    manual_review: <Loader className="w-5 h-5 text-blue-400" />,
+    waiting_for_feedback: <Loader className="w-5 h-5 text-purple-400" />,
   };
 
   const handleSend = (text: string) => {

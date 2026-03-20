@@ -25,6 +25,7 @@ export function useStaggerReveal<T extends HTMLElement>(
 
     let cancelled = false;
     (async () => {
+      // Dynamic import with cancelled flag handles unmount-during-import race condition
       const { animate, stagger: stg } = await import("animejs");
       if (cancelled) return;
       animate(children, {

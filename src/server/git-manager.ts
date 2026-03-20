@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 
 export function isGitAvailable(): boolean {
   try {
@@ -14,12 +14,12 @@ export function initGitRepo(cwd: string): void {
   try {
     execSync("git init", { cwd, stdio: "ignore" });
     execSync("git add -A", { cwd, stdio: "ignore" });
-    execSync('git commit -m "Initial commit by Orchestra AI" --allow-empty', {
+    execFileSync("git", ["commit", "-m", "Initial commit by Orchestra AI", "--allow-empty"], {
       cwd,
       stdio: "ignore",
     });
-  } catch {
-    // Git not available or already initialized — non-fatal
+  } catch (err) {
+    console.debug("[git] initGitRepo failed:", String(err).slice(0, 100));
   }
 }
 
@@ -28,11 +28,8 @@ export function commitTask(cwd: string, taskName: string): void {
   try {
     execSync("git add -A", { cwd, stdio: "ignore" });
     const msg = `Complete: ${taskName}`;
-    execSync("git commit -m " + JSON.stringify(msg) + " --allow-empty", {
-      cwd,
-      stdio: "ignore",
-    });
-  } catch {
-    // ignore
+    execFileSync("git", ["commit", "-m", msg, "--allow-empty"], { cwd, stdio: "ignore" });
+  } catch (err) {
+    console.debug("[git] commitTask failed:", String(err).slice(0, 100));
   }
 }

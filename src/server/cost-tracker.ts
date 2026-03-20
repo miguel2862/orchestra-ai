@@ -9,8 +9,11 @@ export function estimateCost(
   if (!p) {
     const key = Object.keys(PRICING).find((k) => model.startsWith(k));
     p = key ? PRICING[key] : PRICING["claude-sonnet-4-6"];
+    if (!key) {
+      console.warn(`[cost-tracker] Unknown model "${model}", falling back to claude-sonnet-4-6 pricing`);
+    }
   }
   const inputCost = ((usage.input_tokens || 0) / 1_000_000) * p.input;
   const outputCost = ((usage.output_tokens || 0) / 1_000_000) * p.output;
-  return inputCost + outputCost;
+  return Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000;
 }
